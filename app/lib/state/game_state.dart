@@ -8,12 +8,25 @@ import '../models/country.dart';
 
 enum GamePhase { setup, playing, matchOver }
 
-/// Why the last round ended — lets the UI show the right feedback.
+/// Why a player was eliminated from the round — lets the UI show the right
+/// feedback.
 enum RoundEndReason { ruledFalse, timeout }
 
 /// In-session game state only (no persistence, per the v1 spec).
-/// The app tracks turns, score, and the per-turn countdown; the human judge
-/// runs the actual round.
+///
+/// Elimination Round System for 2–[maxPlayers] players (default
+/// [defaultPlayers]):
+/// - Every round starts with a fresh country and ALL players active.
+/// - Active players take turns clockwise on the SAME country.
+/// - Fact ruled TRUE → no points; the turn passes clockwise to the next
+///   active player, still on the same country.
+/// - Fact ruled FALSE or the clock hits 0 → the speaker is eliminated from
+///   the current round; the same country stays up and the turn passes to the
+///   next remaining active player.
+/// - When only ONE active player remains, they score 1 point, everyone is
+///   reset to active, a new country is drawn, and the round winner opens the
+///   next round.
+/// - First player to reach [targetScore] wins the match.
 class GameState extends ChangeNotifier {
   /// Strict per-turn limit (seconds).
   static const int turnDuration = 30;
@@ -21,9 +34,31 @@ class GameState extends ChangeNotifier {
   /// Low-time warning threshold (seconds) — UI turns neon-red / pulses below it.
   static const int dangerThreshold = 5;
 
-  List<String> playerNames = ['لاعب ١', 'لاعب ٢'];
-  List<int> scores = [0, 0];
+  static const int minPlayers = 2;
+  static const int maxPlayers = 4;
+  static const int defaultPlayers = 4;
+
+  static const List<String> _defaultNames = [
+    'لاعب ١',
+    'لاعب ٢',
+    'لاعب ٣',
+    'لاعب ٤',
+  ];
+
+  int totalPlayers = defaultPlayers;
+  List<String> playerNames = List.of(_defaultNames);
+  List<int> scores = List.filled(defaultPlayers, 0);
   int targetScore = 5;
+
+  /// Per-player elimination flags for the CURRENT round. Reset to all-false
+  /// when a new round starts. (Mutated in place — UI selectors must watch the
+  /// scalar elements, e.g. `eliminated[i]`, never the list itself.)
+  List<bool> eliminated = List.filled(defaultPlayers, false);
+
+  /// One "تخطي" (pass) per player per round: true once player i has spent
+  /// theirs. Reset alongside [eliminated] at every round/match start.
+  /// (Also mutated in place — select the scalar elements.)
+  List<bool> hasPassed = List.filled(defaultPlayers, false);
 
   List<Country> _deck = [];
   int _deckIndex = 0;
@@ -31,12 +66,17 @@ class GameState extends ChangeNotifier {
   int roundNumber = 1;
   GamePhase phase = GamePhase.setup;
 
-  /// Set after a round ends: index of the round winner + why it ended.
-  int? lastRoundWinner;
+  /// Set after each elimination: who was knocked out of the round + why.
+  int? lastEliminated;
   RoundEndReason? lastRoundEndReason;
 
-  /// Monotonic count of scored rounds. The UI watches this to fire one-shot
-  /// round-end feedback for BOTH manual (غلط!) and automatic (timeout) losses.
+  /// Set when a round completes: the last player standing (they scored).
+  int? lastRoundWinner;
+
+  /// Monotonic counters the UI watches to fire one-shot feedback:
+  /// [eliminationsCompleted] ticks on every knockout (manual غلط! and
+  /// timeout alike); [roundsCompleted] ticks when a round ends with a winner.
+  int eliminationsCompleted = 0;
   int roundsCompleted = 0;
 
   // --- Turn countdown ---
@@ -49,48 +89,85 @@ class GameState extends ChangeNotifier {
 
   String get currentPlayerName => playerNames[currentPlayer];
 
+  /// Players still in the current round.
+  int get activeCount => eliminated.where((e) => !e).length;
+
+  bool isEliminated(int player) => eliminated[player];
+
+  /// Whether the current speaker can still spend their pass this round.
+  bool get canPass =>
+      phase == GamePhase.playing && !hasPassed[currentPlayer];
+
   /// True while the countdown is in its final [dangerThreshold] seconds.
   bool get isDanger => secondsLeft <= dangerThreshold;
 
   double get timeProgress => secondsLeft / turnDuration; // 1.0 → 0.0
 
+  /// Index of the first player to have reached [targetScore], or null while
+  /// the match is still open.
   int? get matchWinner {
-    if (scores[0] >= targetScore) return 0;
-    if (scores[1] >= targetScore) return 1;
+    for (var i = 0; i < totalPlayers; i++) {
+      if (scores[i] >= targetScore) return i;
+    }
     return null;
   }
 
+  /// [names] length picks the player count for this match (2–[maxPlayers]).
   void startGame({
     required List<String> names,
     required int target,
     required List<Country> countries,
   }) {
-    playerNames = names;
+    assert(
+      names.length >= minPlayers && names.length <= maxPlayers,
+      'startGame expects $minPlayers–$maxPlayers player names',
+    );
+    totalPlayers = names.length.clamp(minPlayers, maxPlayers);
+    playerNames = List.of(names.take(totalPlayers));
     targetScore = target;
-    scores = [0, 0];
+    scores = List.filled(totalPlayers, 0);
+    eliminated = List.filled(totalPlayers, false);
+    hasPassed = List.filled(totalPlayers, false);
     _deck = List.of(countries)..shuffle(Random());
     _deckIndex = 0;
     currentPlayer = 0;
     roundNumber = 1;
+    eliminationsCompleted = 0;
     roundsCompleted = 0;
-    lastRoundWinner = null;
+    lastEliminated = null;
     lastRoundEndReason = null;
+    lastRoundWinner = null;
     phase = GamePhase.playing;
     _startTurnTimer();
     notifyListeners();
   }
 
-  /// The current speaker's fact was accepted — pass the turn (resets the clock).
-  void nextTurn() {
-    currentPlayer = 1 - currentPlayer;
+  /// The judge ruled the current speaker's fact TRUE — no points yet; the
+  /// turn passes clockwise to the next active player on the SAME country.
+  void acceptFact() {
+    if (phase != GamePhase.playing) return;
+    currentPlayer = _nextActive(currentPlayer);
     _startTurnTimer();
     notifyListeners();
   }
 
-  /// The judge ruled the current speaker's fact false — opponent scores.
-  void ruleFalse() => _endRoundAsLoss(RoundEndReason.ruledFalse);
+  /// The judge ruled the current speaker's fact false — they are eliminated
+  /// from this round.
+  void ruleFalse() => _eliminateCurrent(RoundEndReason.ruledFalse);
 
-  /// Swap the country without scoring; gives the current player a fresh clock.
+  /// The current speaker spends their one pass for this round: no
+  /// elimination, no point — the turn simply moves clockwise to the next
+  /// active player with a fresh clock. No-op if the pass is already spent.
+  void passTurn() {
+    if (!canPass) return;
+    hasPassed[currentPlayer] = true;
+    currentPlayer = _nextActive(currentPlayer);
+    _startTurnTimer();
+    notifyListeners();
+  }
+
+  /// Swap the country without any elimination; gives the current player a
+  /// fresh clock. (Round eliminations carry over — only the country changes.)
   void skipCountry() {
     _deckIndex++;
     _startTurnTimer();
@@ -144,9 +221,9 @@ class GameState extends ChangeNotifier {
       secondsLeft = 0;
       // Strong, unmistakable "time's up" jolt in the Judge's hand.
       HapticFeedback.heavyImpact();
-      // Strict timeout: same outcome as being ruled false — the current player
-      // loses the round and the opponent takes the point.
-      _endRoundAsLoss(RoundEndReason.timeout);
+      // Strict timeout: same outcome as being ruled false — eliminated from
+      // the round.
+      _eliminateCurrent(RoundEndReason.timeout);
     } else {
       // Heartbeat: a light tick on each of the final [dangerThreshold] seconds
       // (fires exactly when the ring turns neon-red). Fire-and-forget — the
@@ -158,27 +235,56 @@ class GameState extends ChangeNotifier {
     }
   }
 
-  /// Award the round to the opponent of [currentPlayer], then advance to the
-  /// next round (loser speaks first) or end the match. Shared by the manual
-  /// "غلط!" ruling and the automatic timeout.
-  void _endRoundAsLoss(RoundEndReason reason) {
+  // --- Elimination round engine --------------------------------------------
+
+  /// Next non-eliminated player clockwise from [from] (exclusive).
+  int _nextActive(int from) {
+    var i = from;
+    do {
+      i = (i + 1) % totalPlayers;
+    } while (eliminated[i]);
+    return i;
+  }
+
+  /// Knock the current speaker out of the round. If only one active player
+  /// remains, they win the round (1 point) and a new round begins; otherwise
+  /// the SAME country stays up for the next active player.
+  void _eliminateCurrent(RoundEndReason reason) {
     if (phase != GamePhase.playing) return;
-    final winner = 1 - currentPlayer;
+    eliminated[currentPlayer] = true;
+    lastEliminated = currentPlayer;
+    lastRoundEndReason = reason;
+    eliminationsCompleted++;
+
+    if (activeCount == 1) {
+      _endRound(winner: _nextActive(currentPlayer));
+    } else {
+      currentPlayer = _nextActive(currentPlayer);
+      _startTurnTimer();
+    }
+    notifyListeners();
+  }
+
+  /// Last player standing scores; either the match ends or everyone resets
+  /// to active on a fresh country, with the round winner speaking first.
+  void _endRound({required int winner}) {
     scores[winner]++;
     lastRoundWinner = winner;
-    lastRoundEndReason = reason;
     roundsCompleted++;
 
     if (matchWinner != null) {
       phase = GamePhase.matchOver;
       _stopTimer();
-    } else {
-      roundNumber++;
-      _deckIndex++;
-      // currentPlayer already points at the loser, who starts the next round.
-      _startTurnTimer();
+      return;
     }
-    notifyListeners();
+    roundNumber++;
+    _deckIndex++;
+    for (var i = 0; i < totalPlayers; i++) {
+      eliminated[i] = false;
+      hasPassed[i] = false; // everyone's pass comes back with the new country
+    }
+    currentPlayer = winner;
+    _startTurnTimer();
   }
 
   @override

@@ -5,6 +5,7 @@ import '../models/country.dart';
 import '../services/api_service.dart';
 import '../state/game_state.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_logo.dart';
 import '../widgets/game_button.dart';
 import '../widgets/glass_container.dart';
 import 'game_screen.dart';
@@ -17,8 +18,21 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _player1 = TextEditingController(text: 'لاعب ١');
-  final _player2 = TextEditingController(text: 'لاعب ٢');
+  static const _fieldLabels = [
+    'اللاعب الأول',
+    'اللاعب الثاني',
+    'اللاعب الثالث',
+    'اللاعب الرابع',
+  ];
+  static const _defaultNames = ['لاعب ١', 'لاعب ٢', 'لاعب ٣', 'لاعب ٤'];
+
+  /// One controller per possible seat, created eagerly so a player's typed
+  /// name survives toggling the count down and back up.
+  final List<TextEditingController> _nameControllers = [
+    for (final name in _defaultNames) TextEditingController(text: name),
+  ];
+
+  int _playerCount = GameState.defaultPlayers;
   int _targetScore = 5;
 
   List<Country>? _countries;
@@ -56,15 +70,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _player1.dispose();
-    _player2.dispose();
+    for (final c in _nameControllers) {
+      c.dispose();
+    }
     super.dispose();
   }
 
   void _start() {
+    // Only the visible seats play; blank fields fall back to default names.
     final names = [
-      _player1.text.trim().isEmpty ? 'لاعب ١' : _player1.text.trim(),
-      _player2.text.trim().isEmpty ? 'لاعب ٢' : _player2.text.trim(),
+      for (var i = 0; i < _playerCount; i++)
+        _nameControllers[i].text.trim().isEmpty
+            ? _defaultNames[i]
+            : _nameControllers[i].text.trim(),
     ];
     context.read<GameState>().startGame(
           names: names,
@@ -84,6 +102,9 @@ class _HomeScreenState extends State<HomeScreen> {
           const AmbientBackground(),
           SafeArea(
             child: Center(
+              // Scrollable so 4 fields + keyboard can never overflow: the
+              // scaffold shrinks the viewport above the keyboard and this
+              // view scrolls within whatever height remains.
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(24),
                 child: ConstrainedBox(
@@ -102,8 +123,10 @@ class _HomeScreenState extends State<HomeScreen> {
                             boxShadow: AppShadows.glow(AppColors.neonPurple,
                                 alpha: .5, blur: 34),
                           ),
+                          // Brand emblem without its own badge — it sits on
+                          // this gradient capsule instead.
                           child: const Center(
-                            child: Text('⚖️', style: TextStyle(fontSize: 44)),
+                            child: AppLogo(size: 68, showBadge: false),
                           ),
                         ),
                       ),
@@ -118,7 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       Text(
-                        'لعبة معلومات البلاد — لاعبان وحكم واحد',
+                        'لعبة معلومات البلاد — من ٢ إلى ٤ لاعبين وحكم واحد',
                         textAlign: TextAlign.center,
                         style: AppText.ui(size: 14, color: AppColors.textSecondary),
                       ),
@@ -127,10 +150,30 @@ class _HomeScreenState extends State<HomeScreen> {
                         padding: const EdgeInsets.all(18),
                         child: Column(
                           children: [
-                            _LabeledField(label: 'اللاعب الأول', controller: _player1),
-                            const SizedBox(height: 14),
-                            _LabeledField(label: 'اللاعب الثاني', controller: _player2),
+                            _PlayerCountPicker(
+                              value: _playerCount,
+                              onChanged: (v) => setState(() => _playerCount = v),
+                            ),
                             const SizedBox(height: 18),
+                            // AnimatedSize glides the card open/closed as
+                            // fields appear or disappear with the count.
+                            AnimatedSize(
+                              duration: const Duration(milliseconds: 280),
+                              curve: Curves.easeOutCubic,
+                              alignment: Alignment.topCenter,
+                              child: Column(
+                                children: [
+                                  for (var i = 0; i < _playerCount; i++) ...[
+                                    _LabeledField(
+                                      label: _fieldLabels[i],
+                                      controller: _nameControllers[i],
+                                    ),
+                                    const SizedBox(height: 14),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
                             _TargetPicker(
                               value: _targetScore,
                               onChanged: (v) => setState(() => _targetScore = v),
@@ -178,6 +221,52 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+/// "عدد اللاعبين" pill row (٢ / ٣ / ٤) in the same segment style as the
+/// target-score picker, so the setup card reads as one system.
+class _PlayerCountPicker extends StatelessWidget {
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  const _PlayerCountPicker({required this.value, required this.onChanged});
+
+  static const _arabicDigits = {2: '٢', 3: '٣', 4: '٤'};
+
+  @override
+  Widget build(BuildContext context) {
+    // Fluid pills (like _TargetPicker) so the row can never overflow on
+    // narrow phones regardless of the label's rendered width.
+    return Row(
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(right: 4),
+          child: Text('عدد اللاعبين',
+              style: AppText.ui(size: 12.5, color: AppColors.textSecondary)),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Row(
+            children: [
+              for (var count = GameState.minPlayers;
+                  count <= GameState.maxPlayers;
+                  count++) ...[
+                if (count > GameState.minPlayers) const SizedBox(width: 6),
+                Expanded(
+                  child: _Segment(
+                    label: _arabicDigits[count] ?? '$count',
+                    width: null, // fluid: fill the Expanded slot
+                    selected: count == value,
+                    onTap: () => onChanged(count),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _LabeledField extends StatelessWidget {
   final String label;
   final TextEditingController controller;
@@ -210,10 +299,12 @@ class _TargetPicker extends StatelessWidget {
 
   const _TargetPicker({required this.value, required this.onChanged});
 
-  static const _options = [3, 5, 7, 10];
+  static const _options = [1, 3, 5, 7, 10];
 
   @override
   Widget build(BuildContext context) {
+    // Five options: fixed 44px pills would overflow narrow phones once the
+    // label is added, so the segments share the remaining width fluidly.
     return Row(
       children: [
         Padding(
@@ -221,19 +312,23 @@ class _TargetPicker extends StatelessWidget {
           child: Text('الفوز عند',
               style: AppText.ui(size: 12.5, color: AppColors.textSecondary)),
         ),
-        const Spacer(),
-        Row(
-          children: [
-            for (final opt in _options)
-              Padding(
-                padding: const EdgeInsets.only(left: 8),
-                child: _Segment(
-                  label: '$opt',
-                  selected: opt == value,
-                  onTap: () => onChanged(opt),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Row(
+            children: [
+              for (var i = 0; i < _options.length; i++) ...[
+                if (i > 0) const SizedBox(width: 6),
+                Expanded(
+                  child: _Segment(
+                    label: '${_options[i]}',
+                    width: null, // fluid: fill the Expanded slot
+                    selected: _options[i] == value,
+                    onTap: () => onChanged(_options[i]),
+                  ),
                 ),
-              ),
-          ],
+              ],
+            ],
+          ),
         ),
       ],
     );
@@ -245,10 +340,14 @@ class _Segment extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
+  /// Fixed pill width; pass null to fill the parent (fluid layouts).
+  final double? width;
+
   const _Segment({
     required this.label,
     required this.selected,
     required this.onTap,
+    this.width = 44,
   });
 
   @override
@@ -258,7 +357,7 @@ class _Segment extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 240),
         curve: Curves.easeOutCubic,
-        width: 44,
+        width: width,
         height: 44,
         alignment: Alignment.center,
         decoration: BoxDecoration(

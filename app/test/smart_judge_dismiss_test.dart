@@ -76,12 +76,17 @@ void main() {
     expect(find.byType(SmartJudgeSheet), findsOneWidget);
     expect(game.isPaused, isTrue); // auto-paused while consulting
 
-    // Tap the dimmed area above the glass card.
+    // Tap the dimmed area above the glass card. Bounded pumps (not
+    // pumpAndSettle): closing resumes the turn timer, whose 1-second ticks
+    // never let the tree "settle".
     await tester.tapAt(const Offset(200, 40));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600)); // close animation
 
     expect(find.byType(SmartJudgeSheet), findsNothing);
     expect(game.isPaused, isFalse); // resumed on close
+
+    game.backToSetup(); // stop the turn timer so no timer outlives the test
   });
 
   testWidgets('swipe down also dismisses the sheet', (tester) async {
@@ -108,8 +113,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(SmartJudgeSheet), findsOneWidget);
 
+    // Bounded pumps (not pumpAndSettle): closing resumes the turn timer,
+    // whose 1-second ticks never let the tree "settle".
     await tester.drag(find.byType(SmartJudgeSheet), const Offset(0, 400));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600)); // close animation
     expect(find.byType(SmartJudgeSheet), findsNothing);
+
+    game.backToSetup(); // stop the turn timer so no timer outlives the test
+    await tester.pump();
   });
 }

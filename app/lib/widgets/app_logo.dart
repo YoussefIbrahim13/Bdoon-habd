@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-/// The بدون هبد! brand mark — a neon wireframe globe (geography) being struck
-/// by a judge's gavel (the ruling), inside a gradient-bordered badge.
+/// The بدون هبد! brand mark — a claim being judged:
+/// a neon speech bubble (the spoken "fact") holding a bold emerald verdict
+/// check, with a ruby ✗ badge bursting off its corner (the "هبد!" getting
+/// caught) and amber impact sparks for party-game energy.
 ///
 /// Drawn entirely with [CustomPainter]: no image assets, scales losslessly to
 /// any size, and the neon intensity is externally animatable via [glow]
@@ -18,8 +20,9 @@ class AppLogo extends StatelessWidget {
   final double glow;
 
   /// When false, the rounded gradient-border badge is omitted and only the
-  /// globe + gavel emblem is drawn (transparent behind it). Used for the
-  /// Android adaptive-icon foreground, which sits on its own background.
+  /// bubble/verdict emblem is drawn (transparent behind it). Used for the
+  /// Android adaptive-icon foreground and for embedding the emblem on an
+  /// existing gradient capsule (e.g. the home screen).
   final bool showBadge;
 
   const AppLogo({
@@ -51,18 +54,24 @@ class _LogoPainter extends CustomPainter {
   _LogoPainter({required this.glow, this.showBadge = true});
 
   // All geometry lives in a 100×100 design space, scaled to the actual size.
-  static const _globeCenter = Offset(41, 57);
-  static const _globeRadius = 23.0;
 
-  // Unit vector from the globe center toward the gavel (up-right).
-  static const _strikeDir = Offset(0.753, -0.658);
+  // Speech bubble body (the spoken claim).
+  static const _bubble = Rect.fromLTRB(18, 26, 82, 70);
+  static const _bubbleRadius = 14.0;
+
+  // Ruby ✗ badge riding the bubble's top-right corner.
+  static const _crossCenter = Offset(79, 24);
+  static const _crossArm = 6.5;
+  static const _crossDisc = 11.5;
 
   @override
   void paint(Canvas canvas, Size size) {
     canvas.scale(size.shortestSide / 100);
     if (showBadge) _paintBadge(canvas);
-    _paintGlobe(canvas);
-    _paintGavel(canvas);
+    _paintBubble(canvas);
+    _paintCheck(canvas);
+    _paintCrossBadge(canvas);
+    _paintSparks(canvas);
   }
 
   /// Neon technique: a wide blurred pass in the accent color underneath a
@@ -74,6 +83,7 @@ class _LogoPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = width * 2.4
         ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
         ..color = color.withValues(alpha: .45 * glow)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3.5),
     );
@@ -83,6 +93,7 @@ class _LogoPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = width
         ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
         ..color = Color.lerp(color, Colors.white, .30)!,
     );
   }
@@ -123,139 +134,105 @@ class _LogoPainter extends CustomPainter {
     );
   }
 
-  void _paintGlobe(Canvas c) {
-    final sphere = Path()
-      ..addOval(Rect.fromCircle(center: _globeCenter, radius: _globeRadius));
-    _neonPath(c, sphere, AppColors.electricBlue, 2.2);
-
-    // Meridians: two vertical ellipses.
-    for (final f in const [0.36, 0.72]) {
-      _neonPath(
-        c,
-        Path()
-          ..addOval(Rect.fromCenter(
-            center: _globeCenter,
-            width: _globeRadius * 2 * f,
-            height: _globeRadius * 2,
-          )),
-        AppColors.electricBlue,
-        1.1,
-      );
-    }
-
-    // Parallels: bowed chords, clipped to the sphere.
-    c.save();
-    c.clipPath(sphere);
-    for (final dy in [-_globeRadius * .48, 0.0, _globeRadius * .48]) {
-      final p = Path()
-        ..moveTo(_globeCenter.dx - _globeRadius, _globeCenter.dy + dy)
-        ..quadraticBezierTo(
-          _globeCenter.dx,
-          _globeCenter.dy + dy * 1.75,
-          _globeCenter.dx + _globeRadius,
-          _globeCenter.dy + dy,
-        );
-      _neonPath(c, p, AppColors.electricBlue, 1.1);
-    }
-    c.restore();
-
-    // Emerald location ping — the "country of the round".
-    final ping = _globeCenter + const Offset(-7, -5);
-    c.drawCircle(
-      ping,
-      4.5,
-      Paint()
-        ..color = AppColors.emerald.withValues(alpha: .35 * glow)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
-    );
-    c.drawCircle(
-      ping,
-      2.2,
-      Paint()..color = Color.lerp(AppColors.emerald, Colors.white, .3)!,
-    );
+  /// One continuous outline: rounded rect + a tail flicking down-left
+  /// (RTL-friendly — the speaker "sits" on the right-to-left reading side).
+  Path _bubblePath() {
+    const b = _bubble;
+    const r = _bubbleRadius;
+    const radius = Radius.circular(r);
+    return Path()
+      ..moveTo(b.left + r, b.top)
+      ..lineTo(b.right - r, b.top)
+      ..arcToPoint(Offset(b.right, b.top + r), radius: radius)
+      ..lineTo(b.right, b.bottom - r)
+      ..arcToPoint(Offset(b.right - r, b.bottom), radius: radius)
+      // Bottom edge runs right→left, detours through the tail, and returns.
+      ..lineTo(46, b.bottom)
+      ..lineTo(30, 84) // tail tip
+      ..lineTo(34, b.bottom)
+      ..lineTo(b.left + r, b.bottom)
+      ..arcToPoint(Offset(b.left, b.bottom - r), radius: radius)
+      ..lineTo(b.left, b.top + r)
+      ..arcToPoint(Offset(b.left + r, b.top), radius: radius)
+      ..close();
   }
 
-  void _paintGavel(Canvas c) {
-    final contact = _globeCenter + _strikeDir * _globeRadius;
-    final headCenter = _globeCenter + _strikeDir * (_globeRadius + 7);
-    final angle = math.atan2(_strikeDir.dy, _strikeDir.dx);
-
-    c.save();
-    c.translate(headCenter.dx, headCenter.dy);
-    c.rotate(angle);
-
-    // Local space: +x runs along the handle, away from the globe.
-    final handle = RRect.fromRectAndRadius(
-      const Rect.fromLTRB(7, -3, 32, 3),
-      const Radius.circular(3),
-    );
-    final head = RRect.fromRectAndRadius(
-      const Rect.fromLTRB(-5, -12, 5, 12),
-      const Radius.circular(4),
-    );
-
-    // Purple neon underglow for both parts.
-    final glowPaint = Paint()
-      ..color = AppColors.neonPurple.withValues(alpha: .50 * glow)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-    c.drawRRect(head.inflate(1), glowPaint);
-    c.drawRRect(handle.inflate(1), glowPaint);
-
-    c.drawRRect(
-      handle,
+  void _paintBubble(Canvas c) {
+    // Whisper of a fill so the bubble reads as a surface, not just wire.
+    c.drawPath(
+      _bubblePath(),
       Paint()
         ..shader = ui.Gradient.linear(
-          const Offset(7, 0),
-          const Offset(32, 0),
-          [AppColors.neonPurple, AppColors.electricBlue],
+          const Offset(18, 26),
+          const Offset(82, 70),
+          [
+            AppColors.electricBlue.withValues(alpha: .10 * glow),
+            AppColors.neonPurple.withValues(alpha: .06 * glow),
+          ],
         ),
     );
-    c.drawRRect(
-      head,
-      Paint()
-        ..shader = ui.Gradient.linear(
-          const Offset(0, -12),
-          const Offset(0, 12),
-          [Color.lerp(AppColors.neonPurple, Colors.white, .25)!, AppColors.neonPurple],
-        ),
+    _neonPath(c, _bubblePath(), AppColors.electricBlue, 2.4);
+  }
+
+  /// The verdict: a bold emerald check filling the bubble.
+  void _paintCheck(Canvas c) {
+    final check = Path()
+      ..moveTo(34, 48)
+      ..lineTo(45, 59)
+      ..lineTo(66, 37);
+    _neonPath(c, check, AppColors.emerald, 5);
+  }
+
+  /// The busted claim: a ruby ✗ pinned to the bubble's corner like a
+  /// notification badge.
+  void _paintCrossBadge(Canvas c) {
+    // Dark disc lifts the ✗ off the bubble outline behind it.
+    c.drawCircle(
+      _crossCenter,
+      _crossDisc,
+      Paint()..color = const Color(0xFF15171F),
     );
-    // Crisp edge highlight on the mallet head.
-    c.drawRRect(
-      head,
+    c.drawCircle(
+      _crossCenter,
+      _crossDisc,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1
-        ..color = Colors.white.withValues(alpha: .35),
+        ..strokeWidth = 1.6
+        ..color = AppColors.ruby.withValues(alpha: .55),
     );
-    c.restore();
+    final cross = Path()
+      ..moveTo(_crossCenter.dx - _crossArm, _crossCenter.dy - _crossArm)
+      ..lineTo(_crossCenter.dx + _crossArm, _crossCenter.dy + _crossArm)
+      ..moveTo(_crossCenter.dx + _crossArm, _crossCenter.dy - _crossArm)
+      ..lineTo(_crossCenter.dx - _crossArm, _crossCenter.dy + _crossArm);
+    _neonPath(c, cross, AppColors.ruby, 3.4);
+  }
 
-    // Amber impact sparks fanning out from the strike point.
-    final perp = Offset(-_strikeDir.dy, _strikeDir.dx);
-    for (final side in const [1.0, -1.0]) {
-      for (final tilt in const [0.0, 0.45]) {
-        final raw = perp * side + _strikeDir * tilt;
-        final dir = raw / raw.distance;
-        final from = contact + dir * 5;
-        final to = contact + dir * (10 - tilt * 3);
-        c.drawLine(
-          from,
-          to,
-          Paint()
-            ..strokeWidth = 3.4
-            ..strokeCap = StrokeCap.round
-            ..color = AppColors.amber.withValues(alpha: .40 * glow)
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5),
-        );
-        c.drawLine(
-          from,
-          to,
-          Paint()
-            ..strokeWidth = 1.6
-            ..strokeCap = StrokeCap.round
-            ..color = Color.lerp(AppColors.amber, Colors.white, .35)!
-                .withValues(alpha: (.55 + .45 * glow).clamp(0.0, 1.0).toDouble()),
-        );
-      }
+  /// Amber impact sparks fanning off the ✗ — the "هبد!" exclamation energy.
+  void _paintSparks(Canvas c) {
+    for (final angleDeg in const [-55.0, -10.0, 35.0]) {
+      final a = angleDeg * math.pi / 180;
+      final dir = Offset(math.cos(a), math.sin(a));
+      final from = _crossCenter + dir * (_crossDisc + 2.5);
+      final to = _crossCenter + dir * (_crossDisc + 8.5);
+      c.drawLine(
+        from,
+        to,
+        Paint()
+          ..strokeWidth = 3.4
+          ..strokeCap = StrokeCap.round
+          ..color = AppColors.amber.withValues(alpha: .40 * glow)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5),
+      );
+      c.drawLine(
+        from,
+        to,
+        Paint()
+          ..strokeWidth = 1.6
+          ..strokeCap = StrokeCap.round
+          ..color = Color.lerp(AppColors.amber, Colors.white, .35)!
+              .withValues(alpha: (.55 + .45 * glow).clamp(0.0, 1.0).toDouble()),
+      );
     }
   }
 

@@ -16,7 +16,7 @@ const String _baseUrl = String.fromEnvironment(
 /// Shared secret matching the backend's APP_TOKEN env var — deters drive-by
 /// scripts from burning the Groq quota (not real auth; an APK is decompilable).
 /// Bake it in at build time:
-///   flutter build apk --dart-define=APP_TOKEN=<same value as on Render>
+///   flutter build apk --dart-define=APP_TOKEN=the-same-value-as-on-Render
 /// Empty (the default) sends no header, which the backend accepts only while
 /// its own APP_TOKEN is unset.
 const String _appToken = String.fromEnvironment('APP_TOKEN');

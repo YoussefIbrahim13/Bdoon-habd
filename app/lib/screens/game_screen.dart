@@ -1,16 +1,26 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../models/country.dart';
 import '../state/game_state.dart';
 import '../theme/app_theme.dart';
+import '../widgets/countdown_ring.dart';
+import '../widgets/country_card.dart';
 import '../widgets/game_button.dart';
 import '../widgets/glass_container.dart';
-import '../widgets/pulse_on_change.dart';
+import '../widgets/judge_controls.dart';
+import '../widgets/scoreboard.dart';
 import '../widgets/smart_judge_sheet.dart';
 
+/// Layout controller for a running match.
+///
+/// Owns no game UI of its own: it arranges [Scoreboard], [CountryCard],
+/// [TurnTimerBar], and [JudgeControls], and coordinates everything that
+/// leaves the layer — the round-end snackbar, the rule-false confirm dialog,
+/// the Smart Judge modal sheet, and the match-over takeover view.
+///
+/// Rebuild scope is deliberately narrow: the build subscribes only to
+/// `phase`, `currentCountry`, and `roundNumber` via `context.select`; the
+/// per-second timer ticks rebuild the extracted widgets, not this screen.
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
 
@@ -20,15 +30,17 @@ class GameScreen extends StatefulWidget {
 
 class _GameScreenState extends State<GameScreen> {
   late final GameState _game;
+  int _seenEliminations = 0;
   int _seenRounds = 0;
 
   @override
   void initState() {
     super.initState();
     _game = context.read<GameState>();
+    _seenEliminations = _game.eliminationsCompleted;
     _seenRounds = _game.roundsCompleted;
-    // Fire one-shot round-end feedback for BOTH manual (غلط!) and automatic
-    // (timeout) losses, which both flow through GameState.roundsCompleted.
+    // Fire one-shot feedback for every knockout — manual (غلط!) and timeout
+    // alike — and for round wins, via GameState's monotonic counters.
     _game.addListener(_onGameChanged);
   }
 
@@ -39,21 +51,39 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   void _onGameChanged() {
-    if (_game.roundsCompleted != _seenRounds) {
-      _seenRounds = _game.roundsCompleted;
-      _announceRoundEnd();
+    final roundEnded = _game.roundsCompleted != _seenRounds;
+    final someoneOut = _game.eliminationsCompleted != _seenEliminations;
+    _seenRounds = _game.roundsCompleted;
+    _seenEliminations = _game.eliminationsCompleted;
+    // A round-ending knockout fires both counters at once — the round-win
+    // message wins (it implies the elimination).
+    if (roundEnded) {
+      _announceRoundWon();
+    } else if (someoneOut) {
+      _announceElimination();
     }
   }
 
-  void _announceRoundEnd() {
+  void _announceElimination() {
+    if (!mounted || _game.phase != GamePhase.playing) return;
+    final out = _game.lastEliminated;
+    if (out == null) return;
+    final timedOut = _game.lastRoundEndReason == RoundEndReason.timeout;
+    final msg = timedOut
+        ? '⏰ انتهى وقت ${_game.playerNames[out]} — خرج من الجولة!'
+        : '❌ هبدة! ${_game.playerNames[out]} خرج من الجولة';
+    _showSnack(msg);
+  }
+
+  void _announceRoundWon() {
     // Match-over shows its own screen; only snackbar for continuing play.
     if (!mounted || _game.phase != GamePhase.playing) return;
     final winner = _game.lastRoundWinner;
     if (winner == null) return;
-    final timedOut = _game.lastRoundEndReason == RoundEndReason.timeout;
-    final msg = timedOut
-        ? '⏰ انتهى الوقت — هبدة! نقطة لـ ${_game.playerNames[winner]}'
-        : '🏆 هبدة! نقطة لـ ${_game.playerNames[winner]} — جولة جديدة';
+    _showSnack('🏆 ${_game.playerNames[winner]} آخر الصامدين — نقطة! جولة جديدة');
+  }
+
+  void _showSnack(String msg) {
     // Defer to after the current notify/build cycle.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -71,11 +101,11 @@ class _GameScreenState extends State<GameScreen> {
     });
   }
 
-  Future<void> _confirmRuleFalse(GameState game) async {
-    final speaker = game.currentPlayerName;
+  Future<void> _confirmRuleFalse() async {
+    final speaker = _game.currentPlayerName;
     // Freeze the clock while the judge deliberates in the dialog.
-    final resumeAfter = !game.isPaused;
-    if (resumeAfter) game.pause();
+    final resumeAfter = !_game.isPaused;
+    if (resumeAfter) _game.pause();
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -95,7 +125,7 @@ class _GameScreenState extends State<GameScreen> {
               ),
               const SizedBox(height: 10),
               Text(
-                'معلومة "$speaker" غلط والجولة تنتهي؟',
+                'معلومة "$speaker" غلط ويخرج من الجولة؟',
                 textAlign: TextAlign.center,
                 style: AppText.ui(size: 14, color: AppColors.textSecondary),
               ),
@@ -129,20 +159,20 @@ class _GameScreenState extends State<GameScreen> {
 
     if (confirmed == true) {
       // Round-end feedback is shown by the shared listener.
-      game.ruleFalse();
+      _game.ruleFalse();
     } else if (resumeAfter) {
       // Cancelled — restore the clock we paused.
-      game.resume();
+      _game.resume();
     }
   }
 
-  void _openSmartJudge(GameState game) {
-    final country = game.currentCountry;
+  void _openSmartJudge() {
+    final country = _game.currentCountry;
     if (country == null) return;
     // Consulting the AI shouldn't burn the speaker's clock — auto-pause while
     // the sheet is open, and resume on close only if we were the one to pause.
-    final resumeAfter = !game.isPaused;
-    if (resumeAfter) game.pause();
+    final resumeAfter = !_game.isPaused;
+    if (resumeAfter) _game.pause();
 
     // Do NOT pass a custom transitionAnimationController built from this
     // State's vsync: once the sheet fully covers the game screen, TickerMode
@@ -158,21 +188,22 @@ class _GameScreenState extends State<GameScreen> {
       barrierColor: Colors.black.withValues(alpha: .55),
       builder: (_) => SmartJudgeSheet(country: country),
     ).whenComplete(() {
-      if (resumeAfter) game.resume();
+      if (resumeAfter) _game.resume();
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final game = context.watch<GameState>();
-
-    if (game.phase == GamePhase.matchOver) {
-      return _MatchOverView(game: game);
+    final phase = context.select((GameState g) => g.phase);
+    if (phase == GamePhase.matchOver) {
+      return const _MatchOverView();
     }
-    final country = game.currentCountry;
+
+    final country = context.select((GameState g) => g.currentCountry);
     if (country == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
+    final round = context.select((GameState g) => g.roundNumber);
 
     return Scaffold(
       body: Stack(
@@ -183,52 +214,25 @@ class _GameScreenState extends State<GameScreen> {
               padding: const EdgeInsets.fromLTRB(18, 8, 18, 16),
               child: Column(
                 children: [
-                  _TopBar(round: game.roundNumber, onSkip: game.skipCountry),
+                  _TopBar(round: round, onSkip: _game.skipCountry),
                   const SizedBox(height: 14),
-                  _ScorePanel(game: game),
+                  const Scoreboard(),
                   const SizedBox(height: 18),
                   Expanded(
                     child: Center(
                       child: SingleChildScrollView(
-                        child: _HeroFlagCard(country: country),
+                        child: CountryCard(country: country),
                       ),
                     ),
                   ),
                   const SizedBox(height: 16),
-                  _TurnTimerBar(game: game),
+                  const TurnTimerBar(),
                   const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: GameButton(
-                          label: 'غلط!',
-                          icon: Icons.close_rounded,
-                          height: 60,
-                          gradient: AppGradients.falsehood,
-                          glowColor: AppColors.rubyDeep,
-                          onPressed: () => _confirmRuleFalse(game),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: GameButton(
-                          label: 'صح — التالي',
-                          icon: Icons.check_rounded,
-                          height: 60,
-                          gradient: AppGradients.truth,
-                          glowColor: AppColors.emeraldDeep,
-                          onPressed: game.nextTurn,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  GameButton(
-                    label: 'اسأل الحكم الذكي',
-                    icon: Icons.auto_awesome,
-                    height: 56,
-                    borderGradient: AppGradients.turn,
-                    onPressed: () => _openSmartJudge(game),
+                  JudgeControls(
+                    onRuleFalse: _confirmRuleFalse,
+                    onAcceptFact: _game.acceptFact,
+                    onPass: _game.passTurn,
+                    onAskSmartJudge: _openSmartJudge,
                   ),
                 ],
               ),
@@ -265,229 +269,28 @@ class _TopBar extends StatelessWidget {
           ),
         ),
         const Spacer(),
-        _IconChip(
-          icon: Icons.shuffle_rounded,
-          tooltip: 'تغيير الدولة',
-          onTap: onSkip,
-        ),
-      ],
-    );
-  }
-}
-
-class _IconChip extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  const _IconChip({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: AppColors.glassTint,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          child: Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
+        Tooltip(
+          message: 'تغيير الدولة',
+          child: Material(
+            color: AppColors.glassTint,
+            borderRadius: BorderRadius.circular(14),
+            child: InkWell(
+              onTap: onSkip,
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.stroke),
-            ),
-            child: Icon(icon, size: 20, color: AppColors.textSecondary),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-
-class _ScorePanel extends StatelessWidget {
-  final GameState game;
-  const _ScorePanel({required this.game});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _PlayerScoreCard(
-            name: game.playerNames[0],
-            score: game.scores[0],
-            active: game.currentPlayer == 0,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: Column(
-            children: [
-              Text(
-                'VS',
-                style: AppText.number(
-                  size: 16,
-                  weight: FontWeight.w800,
+              child: Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.stroke),
+                ),
+                child: const Icon(
+                  Icons.shuffle_rounded,
+                  size: 20,
                   color: AppColors.textSecondary,
                 ),
               ),
-              const SizedBox(height: 2),
-              Text(
-                'حتى ${game.targetScore}',
-                style: AppText.ui(size: 11, color: AppColors.textSecondary),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: _PlayerScoreCard(
-            name: game.playerNames[1],
-            score: game.scores[1],
-            active: game.currentPlayer == 1,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _PlayerScoreCard extends StatelessWidget {
-  final String name;
-  final int score;
-  final bool active;
-
-  const _PlayerScoreCard({
-    required this.name,
-    required this.score,
-    required this.active,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // AnimatedContainer smoothly lerps the fill/border/glow on turn switch.
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 320),
-      curve: Curves.easeOutCubic,
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-      decoration: BoxDecoration(
-        gradient: active ? AppGradients.turn : null,
-        color: active ? null : AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(
-          color: active ? Colors.transparent : AppColors.stroke,
-        ),
-        boxShadow: active
-            ? AppShadows.glow(AppColors.neonPurple, alpha: .35)
-            : null,
-      ),
-      child: Column(
-        children: [
-          Text(
-            name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: AppText.ui(
-              size: 14,
-              weight: FontWeight.w700,
-              color: active ? Colors.white : AppColors.textSecondary,
             ),
-          ),
-          const SizedBox(height: 6),
-          PulseOnChange(
-            value: score,
-            child: Text(
-              '$score',
-              style: AppText.number(
-                size: 46,
-                weight: FontWeight.w800,
-                color: active ? Colors.white : AppColors.textPrimary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-
-class _HeroFlagCard extends StatelessWidget {
-  final Country country;
-  const _HeroFlagCard({required this.country});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Heroic flag: gradient border + colored outer glow.
-        GradientBorderCard(
-          gradient: AppGradients.turn,
-          radius: AppRadii.card,
-          borderWidth: 2,
-          padding: const EdgeInsets.all(10),
-          shadows: AppShadows.glow(
-            AppColors.electricBlue,
-            alpha: .28,
-            blur: 40,
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadii.card - 12),
-            child: AspectRatio(
-              aspectRatio: 3 / 2,
-              child: country.flagPng != null
-                  ? Image.network(
-                      country.flagPng!,
-                      fit: BoxFit.cover,
-                      width: 300,
-                      loadingBuilder: (c, child, progress) => progress == null
-                          ? child
-                          : Container(
-                              color: AppColors.surfaceActive,
-                              child: const Center(
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              ),
-                            ),
-                      errorBuilder: (_, _, _) => Container(
-                        color: AppColors.surfaceActive,
-                        alignment: Alignment.center,
-                        child: const Icon(
-                          Icons.flag_outlined,
-                          size: 48,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    )
-                  : Container(color: AppColors.surfaceActive),
-            ),
-          ),
-        ),
-        const SizedBox(height: 22),
-        Text(
-          country.nameAr,
-          textAlign: TextAlign.center,
-          style: AppText.ui(size: 34, weight: FontWeight.w800, height: 1.1),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          country.nameEn.toUpperCase(),
-          textAlign: TextAlign.center,
-          style: AppText.number(
-            size: 14,
-            weight: FontWeight.w600,
-            color: AppColors.textSecondary,
-            spacing: 3,
           ),
         ),
       ],
@@ -496,297 +299,15 @@ class _HeroFlagCard extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Turn countdown: a depleting neon ring + seconds, the current speaker, and a
-// pause/resume toggle. Turns neon-red and pulses in the final 5 seconds.
-
-class _TurnTimerBar extends StatelessWidget {
-  final GameState game;
-  const _TurnTimerBar({required this.game});
-
-  @override
-  Widget build(BuildContext context) {
-    final danger = game.isDanger && !game.isPaused;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 260),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(
-          color: danger
-              ? AppColors.ruby.withValues(alpha: .7)
-              : Colors.transparent,
-          width: 1.4,
-        ),
-        boxShadow: danger
-            ? AppShadows.glow(AppColors.rubyDeep, alpha: .28, blur: 22)
-            : null,
-      ),
-      child: GlassContainer(
-        radius: AppRadii.card,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Row(
-          children: [
-            _CountdownRing(
-              secondsLeft: game.secondsLeft,
-              danger: game.isDanger,
-              paused: game.isPaused,
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'الدور على',
-                    style: AppText.ui(size: 11, color: AppColors.textSecondary),
-                  ),
-                  Text(
-                    game.currentPlayerName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppText.ui(size: 17, weight: FontWeight.w800),
-                  ),
-                  if (game.isPaused)
-                    Text(
-                      '⏸ متوقّف مؤقتاً',
-                      style: AppText.ui(size: 11, color: AppColors.amber),
-                    ),
-                ],
-              ),
-            ),
-            _PauseButton(paused: game.isPaused, onTap: game.togglePause),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CountdownRing extends StatefulWidget {
-  final int secondsLeft;
-  final bool danger;
-  final bool paused;
-
-  const _CountdownRing({
-    required this.secondsLeft,
-    required this.danger,
-    required this.paused,
-  });
-
-  @override
-  State<_CountdownRing> createState() => _CountdownRingState();
-}
-
-class _CountdownRingState extends State<_CountdownRing>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 620),
-  );
-
-  bool get _shouldPulse => widget.danger && !widget.paused;
-
-  @override
-  void initState() {
-    super.initState();
-    _syncPulse();
-  }
-
-  @override
-  void didUpdateWidget(_CountdownRing old) {
-    super.didUpdateWidget(old);
-    _syncPulse();
-  }
-
-  void _syncPulse() {
-    if (_shouldPulse && !_pulse.isAnimating) {
-      _pulse.repeat(reverse: true);
-    } else if (!_shouldPulse && _pulse.isAnimating) {
-      _pulse
-        ..stop()
-        ..value = 0;
-    }
-  }
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final Color accent = widget.paused
-        ? AppColors.textSecondary
-        : (widget.danger ? AppColors.ruby : AppColors.electricBlue);
-    final Color numberColor = widget.paused
-        ? AppColors.textSecondary
-        : (widget.danger ? AppColors.ruby : Colors.white);
-    final progress = (widget.secondsLeft / GameState.turnDuration).clamp(
-      0.0,
-      1.0,
-    );
-
-    return SizedBox(
-      width: 58,
-      height: 58,
-      // Outer tween glides the arc smoothly between the 1-second ticks.
-      child: TweenAnimationBuilder<double>(
-        tween: Tween<double>(begin: 1, end: progress),
-        duration: const Duration(milliseconds: 950),
-        curve: Curves.linear,
-        builder: (context, animatedProgress, _) => AnimatedBuilder(
-          animation: _pulse,
-          builder: (context, _) {
-            final t = Curves.easeInOut.transform(_pulse.value);
-            final glow = widget.paused
-                ? 0.0
-                : (_shouldPulse ? 0.5 + 0.5 * t : 0.55);
-            final scale = _shouldPulse ? 1.0 + 0.10 * t : 1.0;
-            return CustomPaint(
-              painter: _RingPainter(
-                progress: animatedProgress,
-                color: accent,
-                glow: glow,
-              ),
-              child: Center(
-                child: Transform.scale(
-                  scale: scale,
-                  child: Text(
-                    '${widget.secondsLeft}',
-                    style: AppText.number(
-                      size: 22,
-                      weight: FontWeight.w800,
-                      color: numberColor,
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _RingPainter extends CustomPainter {
-  final double progress; // 1.0 (full) → 0.0 (empty)
-  final Color color;
-  final double glow; // 0..1
-
-  const _RingPainter({
-    required this.progress,
-    required this.color,
-    required this.glow,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    const stroke = 5.0;
-    final radius = (size.shortestSide - stroke) / 2 - 1;
-
-    // Faint full track.
-    canvas.drawCircle(
-      center,
-      radius,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = stroke
-        ..color = AppColors.stroke,
-    );
-
-    if (progress <= 0) return;
-    final rect = Rect.fromCircle(center: center, radius: radius);
-    const start = -math.pi / 2; // 12 o'clock
-    final sweep = progress * 2 * math.pi;
-
-    // Blurred neon underglow.
-    if (glow > 0) {
-      canvas.drawArc(
-        rect,
-        start,
-        sweep,
-        false,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = stroke
-          ..strokeCap = StrokeCap.round
-          ..color = color.withValues(alpha: 0.6 * glow)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
-      );
-    }
-    // Crisp core arc.
-    canvas.drawArc(
-      rect,
-      start,
-      sweep,
-      false,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = stroke
-        ..strokeCap = StrokeCap.round
-        ..color = color,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_RingPainter old) =>
-      old.progress != progress || old.color != color || old.glow != glow;
-}
-
-class _PauseButton extends StatelessWidget {
-  final bool paused;
-  final VoidCallback onTap;
-
-  const _PauseButton({required this.paused, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = paused ? AppColors.amber : AppColors.textSecondary;
-    return Tooltip(
-      message: paused ? 'استئناف الوقت' : 'إيقاف الوقت مؤقتاً',
-      child: Material(
-        color: paused
-            ? AppColors.amber.withValues(alpha: .14)
-            : AppColors.glassTint,
-        borderRadius: BorderRadius.circular(15),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(15),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(
-                color: paused
-                    ? AppColors.amber.withValues(alpha: .55)
-                    : AppColors.stroke,
-              ),
-            ),
-            child: Icon(
-              paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-              size: 26,
-              color: color,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
+// Full-screen takeover shown when the match is decided. Reads GameState
+// directly (values are frozen once the phase is matchOver).
 
 class _MatchOverView extends StatelessWidget {
-  final GameState game;
-  const _MatchOverView({required this.game});
+  const _MatchOverView();
 
   @override
   Widget build(BuildContext context) {
+    final game = context.watch<GameState>();
     final winner = game.matchWinner!;
     return Scaffold(
       body: Stack(
@@ -828,9 +349,9 @@ class _MatchOverView extends StatelessWidget {
                         vertical: 16,
                       ),
                       child: Text(
-                        '${game.scores[0]}  -  ${game.scores[1]}',
+                        game.scores.join('  -  '),
                         style: AppText.number(
-                          size: 40,
+                          size: game.totalPlayers > 2 ? 30 : 40,
                           weight: FontWeight.w800,
                         ),
                       ),
