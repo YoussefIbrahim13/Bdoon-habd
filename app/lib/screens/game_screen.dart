@@ -18,7 +18,7 @@ class GameScreen extends StatefulWidget {
   State<GameScreen> createState() => _GameScreenState();
 }
 
-class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
+class _GameScreenState extends State<GameScreen> {
   late final GameState _game;
   int _seenRounds = 0;
 
@@ -144,18 +144,20 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     final resumeAfter = !game.isPaused;
     if (resumeAfter) game.pause();
 
-    final controller = BottomSheet.createAnimationController(this)
-      ..duration = const Duration(milliseconds: 480)
-      ..reverseDuration = const Duration(milliseconds: 240);
+    // Do NOT pass a custom transitionAnimationController built from this
+    // State's vsync: once the sheet fully covers the game screen, TickerMode
+    // mutes this route's tickers, freezing that controller — so the dismiss
+    // animation never completes and the sheet can't be closed. Letting the
+    // route create its own (overlay-vsync) controller keeps close working.
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      isDismissible: true, // tap outside to close
+      enableDrag: true, // swipe down to close
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withValues(alpha: .55),
-      transitionAnimationController: controller,
       builder: (_) => SmartJudgeSheet(country: country),
     ).whenComplete(() {
-      controller.dispose();
       if (resumeAfter) game.resume();
     });
   }
@@ -509,7 +511,9 @@ class _TurnTimerBar extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(
-          color: danger ? AppColors.ruby.withValues(alpha: .7) : Colors.transparent,
+          color: danger
+              ? AppColors.ruby.withValues(alpha: .7)
+              : Colors.transparent,
           width: 1.4,
         ),
         boxShadow: danger
@@ -618,8 +622,10 @@ class _CountdownRingState extends State<_CountdownRing>
     final Color numberColor = widget.paused
         ? AppColors.textSecondary
         : (widget.danger ? AppColors.ruby : Colors.white);
-    final progress =
-        (widget.secondsLeft / GameState.turnDuration).clamp(0.0, 1.0);
+    final progress = (widget.secondsLeft / GameState.turnDuration).clamp(
+      0.0,
+      1.0,
+    );
 
     return SizedBox(
       width: 58,

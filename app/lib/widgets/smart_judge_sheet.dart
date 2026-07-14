@@ -68,101 +68,119 @@ class _SmartJudgeSheetState extends State<SmartJudgeSheet> {
       reverseCurve: Curves.easeIn,
     );
 
-    return FadeTransition(
-      opacity: anim,
-      child: ScaleTransition(
-        scale: Tween<double>(begin: 0.92, end: 1.0).animate(spring),
-        alignment: Alignment.bottomCenter,
-        child: Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
+    return Column(
+      // Full-height sheet so the transparent area above the glass card is an
+      // explicit tap-to-dismiss target — dismissal never depends on the modal
+      // barrier (which the custom transition controller can leave unresponsive).
+      // The route's dim scrim still shows through the transparent area.
+      mainAxisSize: MainAxisSize.max,
+      children: [
+        Expanded(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Navigator.of(context).maybePop(),
           ),
-          child: ClipRRect(
-            borderRadius: const BorderRadius.vertical(
-              top: Radius.circular(AppRadii.sheet),
-            ),
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 26, sigmaY: 26),
-              child: Container(
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: AppColors.surface.withValues(alpha: .82),
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(AppRadii.sheet),
-                  ),
-                  border: const Border(
-                    top: BorderSide(color: AppColors.stroke),
-                    left: BorderSide(color: AppColors.stroke),
-                    right: BorderSide(color: AppColors.stroke),
-                  ),
+        ),
+        FadeTransition(
+          opacity: anim,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.92, end: 1.0).animate(spring),
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+              ),
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppRadii.sheet),
                 ),
-                padding: const EdgeInsets.fromLTRB(22, 12, 22, 26),
-                child: SafeArea(
-                  top: false,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 44,
-                          height: 5,
-                          decoration: BoxDecoration(
-                            color: AppColors.stroke,
-                            borderRadius: BorderRadius.circular(3),
+                child: BackdropFilter(
+                  filter: ui.ImageFilter.blur(sigmaX: 26, sigmaY: 26),
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: AppColors.surface.withValues(alpha: .82),
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(AppRadii.sheet),
+                      ),
+                      border: const Border(
+                        top: BorderSide(color: AppColors.stroke),
+                        left: BorderSide(color: AppColors.stroke),
+                        right: BorderSide(color: AppColors.stroke),
+                      ),
+                    ),
+                    padding: const EdgeInsets.fromLTRB(22, 12, 22, 26),
+                    child: SafeArea(
+                      top: false,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Center(
+                            child: Container(
+                              width: 44,
+                              height: 5,
+                              decoration: BoxDecoration(
+                                color: AppColors.stroke,
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                            ),
                           ),
-                        ),
+                          const SizedBox(height: 18),
+                          _Header(country: widget.country),
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: _claimController,
+                            maxLines: 2,
+                            minLines: 1,
+                            style: AppText.ui(
+                              size: 15,
+                              weight: FontWeight.w600,
+                            ),
+                            textInputAction: TextInputAction.send,
+                            onSubmitted: (_) => _submit(),
+                            decoration: InputDecoration(
+                              hintText:
+                                  'مثال: عاصمة ${widget.country.nameAr} هي ...',
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          GameButton(
+                            label: _loading
+                                ? 'جاري التحقق...'
+                                : 'تحقّق من المعلومة',
+                            icon: _loading ? null : Icons.gavel_rounded,
+                            leading: _loading
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : null,
+                            gradient: AppGradients.turn,
+                            glowColor: AppColors.neonPurple,
+                            onPressed: _loading ? null : _submit,
+                          ),
+                          // Animated reveal for the result / error card.
+                          AnimatedSize(
+                            duration: const Duration(milliseconds: 320),
+                            curve: Curves.easeOutCubic,
+                            alignment: Alignment.topCenter,
+                            child: _buildResult(),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 18),
-                      _Header(country: widget.country),
-                      const SizedBox(height: 16),
-                      TextField(
-                        controller: _claimController,
-                        maxLines: 2,
-                        minLines: 1,
-                        style: AppText.ui(size: 15, weight: FontWeight.w600),
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => _submit(),
-                        decoration: InputDecoration(
-                          hintText:
-                              'مثال: عاصمة ${widget.country.nameAr} هي ...',
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      GameButton(
-                        label: _loading
-                            ? 'جاري التحقق...'
-                            : 'تحقّق من المعلومة',
-                        icon: _loading ? null : Icons.gavel_rounded,
-                        leading: _loading
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : null,
-                        gradient: AppGradients.turn,
-                        glowColor: AppColors.neonPurple,
-                        onPressed: _loading ? null : _submit,
-                      ),
-                      // Animated reveal for the result / error card.
-                      AnimatedSize(
-                        duration: const Duration(milliseconds: 320),
-                        curve: Curves.easeOutCubic,
-                        alignment: Alignment.topCenter,
-                        child: _buildResult(),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
             ),
           ),
         ),
-      ),
+      ],
     );
   }
 

@@ -47,6 +47,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -98,3 +99,15 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# Launcher icon generation (run: dart run flutter_launcher_icons).
+# The source PNGs are rasterized from the in-app AppLogo painter.
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/app_icon.png"        # iOS + Android legacy fallback
+  remove_alpha_ios: true                            # iOS icons must be opaque
+  min_sdk_android: 21
+  # Android 8+ adaptive icon: neon emblem on the premium obsidian background.
+  adaptive_icon_background: "#121214"
+  adaptive_icon_foreground: "assets/images/app_icon_foreground.png"

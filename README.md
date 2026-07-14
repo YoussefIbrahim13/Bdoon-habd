@@ -51,8 +51,29 @@ returns a friendly 503.
    built-in web search (Tavily) so verdicts are grounded in live sources
    rather than the model's memory.
 
-Verdicts are cached in-memory per (country, claim), and there's a naive
-per-IP rate limit (20/min).
+Verdicts are cached in-memory per (country, claim) in a bounded LRU, and
+there's a proxy-aware per-IP rate limit (20/min).
+
+### Protecting the Groq quota
+
+Three layers keep `/verify-fact` from burning the free-tier Groq quota:
+
+1. **Per-IP rate limit** (20/min, reads `X-Forwarded-For` behind Render).
+2. **Global budget** — at most 60 uncached verifications/min across *all*
+   clients; beyond that the endpoint returns 429 ("the human judge decides").
+   Cache hits don't count against it.
+3. **Shared app token** (optional) — set `APP_TOKEN` to any random string in
+   the backend env (Render dashboard) **and** bake the same value into the
+   app build:
+
+   ```powershell
+   flutter build apk --dart-define=APP_TOKEN=<your random string>
+   ```
+
+   The app sends it as `X-App-Token`; requests without it get 401. If the
+   backend's `APP_TOKEN` is unset, enforcement is off (local dev, older
+   builds). This is a deterrent, not real auth — an APK can be decompiled —
+   but combined with the global budget it caps the damage either way.
 
 > **Data source note — deviation from the brief:** the brief suggested the
 > REST Countries API ("free, no key"), but as of mid-2026 REST Countries

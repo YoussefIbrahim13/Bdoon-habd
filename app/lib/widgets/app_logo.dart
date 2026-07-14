@@ -17,7 +17,17 @@ class AppLogo extends StatelessWidget {
   /// Neon intensity 0..1 — drive this from an animation for a pulse effect.
   final double glow;
 
-  const AppLogo({super.key, this.size = 120, this.glow = .8});
+  /// When false, the rounded gradient-border badge is omitted and only the
+  /// globe + gavel emblem is drawn (transparent behind it). Used for the
+  /// Android adaptive-icon foreground, which sits on its own background.
+  final bool showBadge;
+
+  const AppLogo({
+    super.key,
+    this.size = 120,
+    this.glow = .8,
+    this.showBadge = true,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -25,7 +35,10 @@ class AppLogo extends StatelessWidget {
       // Isolates frequent glow repaints from the rest of the tree.
       child: CustomPaint(
         size: Size.square(size),
-        painter: _LogoPainter(glow: glow.clamp(0.0, 1.0).toDouble()),
+        painter: _LogoPainter(
+          glow: glow.clamp(0.0, 1.0).toDouble(),
+          showBadge: showBadge,
+        ),
       ),
     );
   }
@@ -33,8 +46,9 @@ class AppLogo extends StatelessWidget {
 
 class _LogoPainter extends CustomPainter {
   final double glow;
+  final bool showBadge;
 
-  _LogoPainter({required this.glow});
+  _LogoPainter({required this.glow, this.showBadge = true});
 
   // All geometry lives in a 100×100 design space, scaled to the actual size.
   static const _globeCenter = Offset(41, 57);
@@ -46,7 +60,7 @@ class _LogoPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.scale(size.shortestSide / 100);
-    _paintBadge(canvas);
+    if (showBadge) _paintBadge(canvas);
     _paintGlobe(canvas);
     _paintGavel(canvas);
   }
@@ -246,5 +260,6 @@ class _LogoPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_LogoPainter old) => old.glow != glow;
+  bool shouldRepaint(_LogoPainter old) =>
+      old.glow != glow || old.showBadge != showBadge;
 }
