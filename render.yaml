@@ -1,0 +1,21 @@
+# Render Blueprint for the "بدون هبد!" (Bedoon Habd) backend — monorepo layout.
+#
+# IMPORTANT: Render only auto-detects a Blueprint named `render.yaml` at the
+# REPOSITORY ROOT, which is why this file lives here (not in backend/).
+# `rootDir: backend` makes every Docker path below resolve inside backend/.
+#
+# Deploy: Render → New → Blueprint → pick this repo → enter GROQ_API_KEY.
+services:
+  - name: badon-habd-api
+    type: web
+    runtime: docker
+    plan: free                 # free tier sleeps after ~15 min idle (cold start ~1 min)
+    region: frankfurt          # pick the region closest to your players
+    rootDir: backend           # build from the backend/ subdirectory
+    dockerfilePath: ./Dockerfile   # resolves to backend/Dockerfile
+    dockerContext: .               # resolves to backend/
+    healthCheckPath: /health   # the backend exposes GET /health
+    autoDeployTrigger: commit  # redeploy automatically on push
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false            # enter this secret in the Render dashboard
