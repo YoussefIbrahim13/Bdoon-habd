@@ -1,0 +1,8 @@
+# Python backend
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.env
+backend/countries_cache.json
+backend/uvicorn*.log
+backend/uvicorn.pid

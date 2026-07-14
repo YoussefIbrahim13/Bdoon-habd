@@ -1,0 +1,12 @@
+# Keep the build context small and never ship secrets or local cruft.
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.env
+.env.*
+countries_cache.json
+uvicorn*.log
+uvicorn.pid
+Dockerfile
+.dockerignore
