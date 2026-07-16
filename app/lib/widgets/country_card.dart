@@ -23,11 +23,15 @@ class CountryCard extends StatelessWidget {
           radius: AppRadii.card,
           borderWidth: 2,
           padding: const EdgeInsets.all(10),
-          shadows: AppShadows.glow(
-            AppColors.electricBlue,
-            alpha: .28,
-            blur: 40,
-          ),
+          // Dual-tone halo (blue high, purple low) for deeper glass lift.
+          shadows: [
+            ...AppShadows.glow(AppColors.electricBlue, alpha: .26, blur: 40),
+            BoxShadow(
+              color: AppColors.neonPurple.withValues(alpha: .18),
+              blurRadius: 54,
+              offset: const Offset(0, 22),
+            ),
+          ],
           child: ClipRRect(
             borderRadius: BorderRadius.circular(AppRadii.card - 12),
             child: AspectRatio(

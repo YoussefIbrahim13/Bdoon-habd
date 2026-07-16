@@ -18,18 +18,19 @@ class TurnTimerBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final danger = context.select((GameState g) => g.isDanger && !g.isPaused);
+    // Red urgency chrome from the 10s warning mark onward.
+    final warn = context.select((GameState g) => g.isWarn && !g.isPaused);
     return AnimatedContainer(
       duration: const Duration(milliseconds: 260),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(
-          color: danger
+          color: warn
               ? AppColors.ruby.withValues(alpha: .7)
               : Colors.transparent,
           width: 1.4,
         ),
-        boxShadow: danger
+        boxShadow: warn
             ? AppShadows.glow(AppColors.rubyDeep, alpha: .28, blur: 22)
             : null,
       ),
@@ -56,10 +57,12 @@ class _RingSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final secondsLeft = context.select((GameState g) => g.secondsLeft);
+    final warn = context.select((GameState g) => g.isWarn);
     final danger = context.select((GameState g) => g.isDanger);
     final paused = context.select((GameState g) => g.isPaused);
     return CountdownRing(
       secondsLeft: secondsLeft,
+      warn: warn,
       danger: danger,
       paused: paused,
     );
@@ -110,17 +113,21 @@ class _PauseSection extends StatelessWidget {
   }
 }
 
-/// Pure presentational countdown ring: depleting arc + seconds number, with
-/// a danger pulse in the final seconds. State-agnostic (takes plain values),
-/// so it is reusable and widget-testable without a provider.
+/// Pure presentational countdown ring: depleting arc + seconds number.
+/// Neon-blue while calm; at [GameState.warnThreshold] it shifts to urgent
+/// red and starts pulsing, and at [GameState.dangerThreshold] the pulse
+/// ACCELERATES. State-agnostic (takes plain values), so it is reusable and
+/// widget-testable without a provider.
 class CountdownRing extends StatefulWidget {
   final int secondsLeft;
+  final bool warn;
   final bool danger;
   final bool paused;
 
   const CountdownRing({
     super.key,
     required this.secondsLeft,
+    required this.warn,
     required this.danger,
     required this.paused,
   });
@@ -131,12 +138,15 @@ class CountdownRing extends StatefulWidget {
 
 class _CountdownRingState extends State<CountdownRing>
     with SingleTickerProviderStateMixin {
+  static const _warnBeat = Duration(milliseconds: 640);
+  static const _dangerBeat = Duration(milliseconds: 360);
+
   late final AnimationController _pulse = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 620),
+    duration: _warnBeat,
   );
 
-  bool get _shouldPulse => widget.danger && !widget.paused;
+  bool get _shouldPulse => widget.warn && !widget.paused;
 
   @override
   void initState() {
@@ -151,9 +161,16 @@ class _CountdownRingState extends State<CountdownRing>
   }
 
   void _syncPulse() {
-    if (_shouldPulse && !_pulse.isAnimating) {
-      _pulse.repeat(reverse: true);
-    } else if (!_shouldPulse && _pulse.isAnimating) {
+    final beat = widget.danger ? _dangerBeat : _warnBeat;
+    if (_shouldPulse) {
+      // (Re)start when newly pulsing or when the tempo steps up at the
+      // danger mark — repeat() picks up the new duration.
+      if (!_pulse.isAnimating || _pulse.duration != beat) {
+        _pulse
+          ..duration = beat
+          ..repeat(reverse: true);
+      }
+    } else if (_pulse.isAnimating) {
       _pulse
         ..stop()
         ..value = 0;
@@ -170,10 +187,10 @@ class _CountdownRingState extends State<CountdownRing>
   Widget build(BuildContext context) {
     final Color accent = widget.paused
         ? AppColors.textSecondary
-        : (widget.danger ? AppColors.ruby : AppColors.electricBlue);
+        : (widget.warn ? AppColors.ruby : AppColors.electricBlue);
     final Color numberColor = widget.paused
         ? AppColors.textSecondary
-        : (widget.danger ? AppColors.ruby : Colors.white);
+        : (widget.warn ? AppColors.ruby : Colors.white);
     final progress = (widget.secondsLeft / GameState.turnDuration).clamp(
       0.0,
       1.0,

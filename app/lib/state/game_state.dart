@@ -31,7 +31,12 @@ class GameState extends ChangeNotifier {
   /// Strict per-turn limit (seconds).
   static const int turnDuration = 30;
 
-  /// Low-time warning threshold (seconds) — UI turns neon-red / pulses below it.
+  /// Early warning threshold (seconds) — the timer shifts from neon blue to
+  /// urgent red and starts pulsing below it.
+  static const int warnThreshold = 10;
+
+  /// Critical threshold (seconds) — the pulse accelerates and haptic
+  /// heartbeat ticks fire below it.
   static const int dangerThreshold = 5;
 
   static const int minPlayers = 2;
@@ -95,10 +100,14 @@ class GameState extends ChangeNotifier {
   bool isEliminated(int player) => eliminated[player];
 
   /// Whether the current speaker can still spend their pass this round.
-  bool get canPass =>
-      phase == GamePhase.playing && !hasPassed[currentPlayer];
+  bool get canPass => phase == GamePhase.playing && !hasPassed[currentPlayer];
 
-  /// True while the countdown is in its final [dangerThreshold] seconds.
+  /// True while the countdown is in its final [warnThreshold] seconds —
+  /// drives the blue→red shift and the start of the pulse.
+  bool get isWarn => secondsLeft <= warnThreshold;
+
+  /// True while the countdown is in its final [dangerThreshold] seconds —
+  /// drives the accelerated pulse and haptic ticks.
   bool get isDanger => secondsLeft <= dangerThreshold;
 
   double get timeProgress => secondsLeft / turnDuration; // 1.0 → 0.0
@@ -112,23 +121,40 @@ class GameState extends ChangeNotifier {
     return null;
   }
 
+  /// Below this many countries, a difficulty filter is ignored — a party
+  /// deck that thin would repeat flags constantly.
+  static const int minDeckSize = 8;
+
+  /// The difficulty this match was started with (null = all countries).
+  CountryDifficulty? difficulty;
+
   /// [names] length picks the player count for this match (2–[maxPlayers]).
+  ///
+  /// [difficulty] filters the deck to matching countries; null plays the
+  /// whole world. If the filter leaves fewer than [minDeckSize] countries,
+  /// the full list is used instead.
   void startGame({
     required List<String> names,
     required int target,
     required List<Country> countries,
+    CountryDifficulty? difficulty,
   }) {
     assert(
       names.length >= minPlayers && names.length <= maxPlayers,
       'startGame expects $minPlayers–$maxPlayers player names',
     );
+    this.difficulty = difficulty;
+    final filtered = difficulty == null
+        ? countries
+        : countries.where((c) => c.difficulty == difficulty).toList();
+    final pool = filtered.length >= minDeckSize ? filtered : countries;
     totalPlayers = names.length.clamp(minPlayers, maxPlayers);
     playerNames = List.of(names.take(totalPlayers));
     targetScore = target;
     scores = List.filled(totalPlayers, 0);
     eliminated = List.filled(totalPlayers, false);
     hasPassed = List.filled(totalPlayers, false);
-    _deck = List.of(countries)..shuffle(Random());
+    _deck = List.of(pool)..shuffle(Random());
     _deckIndex = 0;
     currentPlayer = 0;
     roundNumber = 1;
@@ -175,7 +201,33 @@ class GameState extends ChangeNotifier {
   }
 
   void backToSetup() {
+    resetGame();
+  }
+
+  /// Hard reset to a fresh lobby-ready state.
+  ///
+  /// Used when leaving an active match abruptly (for example from the
+  /// in-game "end match" action) so no timer or round state leaks past exit.
+  void resetGame() {
     _stopTimer();
+    totalPlayers = defaultPlayers;
+    playerNames = List.of(_defaultNames);
+    scores = List.filled(defaultPlayers, 0);
+    targetScore = 5;
+    eliminated = List.filled(defaultPlayers, false);
+    hasPassed = List.filled(defaultPlayers, false);
+    _deck = [];
+    _deckIndex = 0;
+    difficulty = null;
+    currentPlayer = 0;
+    roundNumber = 1;
+    secondsLeft = turnDuration;
+    isPaused = false;
+    eliminationsCompleted = 0;
+    roundsCompleted = 0;
+    lastEliminated = null;
+    lastRoundEndReason = null;
+    lastRoundWinner = null;
     phase = GamePhase.setup;
     notifyListeners();
   }

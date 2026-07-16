@@ -33,7 +33,13 @@ void main() {
     await tester.pump();
 
     // All five target pills are present, including the new "1".
+    // ("3" appears in BOTH pickers — player count and target — so use
+    // findsWidgets rather than findsOneWidget.)
     for (final opt in ['1', '3', '5', '7', '10']) {
+      expect(find.text(opt), findsWidgets);
+    }
+    // Player-count pills use English digits too.
+    for (final opt in ['2', '4']) {
       expect(find.text(opt), findsOneWidget);
     }
     // No RenderFlex overflow was thrown at 320dp.

@@ -21,13 +21,23 @@ class JudgeControls extends StatelessWidget {
   final VoidCallback onPass;
   final VoidCallback onAskSmartJudge;
 
+  /// Optional anchors for the first-time coach-marks tour: the verdict row
+  /// (صح/غلط) and the pass button, so the tutorial can spotlight them.
+  final Key? verdictRowKey;
+  final Key? passKey;
+
   const JudgeControls({
     super.key,
     required this.onRuleFalse,
     required this.onAcceptFact,
     required this.onPass,
     required this.onAskSmartJudge,
+    this.verdictRowKey,
+    this.passKey,
   });
+
+  Widget _keyed(Key? k, Widget child) =>
+      k == null ? child : KeyedSubtree(key: k, child: child);
 
   @override
   Widget build(BuildContext context) {
@@ -36,43 +46,56 @@ class JudgeControls extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: GameButton(
-                label: 'غلط!',
-                icon: Icons.close_rounded,
-                height: 60,
-                gradient: AppGradients.falsehood,
-                glowColor: AppColors.rubyDeep,
-                onPressed: onRuleFalse,
+        _keyed(
+          verdictRowKey,
+          Row(
+            children: [
+              Expanded(
+                child: GameButton(
+                  label: 'غلط!',
+                  icon: Icons.close_rounded,
+                  height: 60,
+                  gradient: AppGradients.falsehood,
+                  glowColor: AppColors.rubyDeep,
+                  onPressed: onRuleFalse,
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: GameButton(
-                label: 'صح — التالي',
-                icon: Icons.check_rounded,
-                height: 60,
-                gradient: AppGradients.truth,
-                glowColor: AppColors.emeraldDeep,
-                onPressed: onAcceptFact,
+              const SizedBox(width: 12),
+              Expanded(
+                child: GameButton(
+                  label: 'صح — التالي',
+                  icon: Icons.check_rounded,
+                  height: 60,
+                  gradient: AppGradients.truth,
+                  glowColor: AppColors.emeraldDeep,
+                  onPressed: onAcceptFact,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            // One pass per player per round — disabled (dimmed) once the
-            // current speaker has spent theirs; GameButton renders a null
-            // onPressed as inert + faded.
+            // One pass per player per round. AnimatedSwitcher cross-fades
+            // between the live tactile button and the sleek obsidian
+            // "locked" plate once the pass is spent.
             Expanded(
-              child: GameButton(
-                label: 'تخطي',
-                icon: Icons.fast_forward_rounded,
-                height: 56,
-                onPressed: canPass ? onPass : null,
+              child: _keyed(
+                passKey,
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 260),
+                  child: canPass
+                      ? GameButton(
+                          key: const ValueKey('pass-live'),
+                          label: 'تخطي',
+                          icon: Icons.fast_forward_rounded,
+                          height: 56,
+                          borderGradient: AppGradients.uncertain,
+                          onPressed: onPass,
+                        )
+                      : const _LockedPassPlate(key: ValueKey('pass-locked')),
+                ),
               ),
             ),
             const SizedBox(width: 12),
@@ -89,6 +112,43 @@ class JudgeControls extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// The spent-pass state: not a greyed-out button but a quiet obsidian plate
+/// with a lock — clearly inert, still premium.
+class _LockedPassPlate extends StatelessWidget {
+  const _LockedPassPlate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 56,
+      decoration: BoxDecoration(
+        color: AppColors.surface.withValues(alpha: .55),
+        borderRadius: BorderRadius.circular(AppRadii.button),
+        border: Border.all(color: AppColors.stroke),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.lock_rounded,
+            size: 15,
+            color: AppColors.textSecondary.withValues(alpha: .7),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'تخطي',
+            style: AppText.ui(
+              size: 15,
+              weight: FontWeight.w700,
+              color: AppColors.textSecondary.withValues(alpha: .55),
+            ).copyWith(decoration: TextDecoration.lineThrough),
+          ),
+        ],
+      ),
     );
   }
 }

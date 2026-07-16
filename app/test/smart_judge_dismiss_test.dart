@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:el_hakem/models/country.dart';
 import 'package:el_hakem/screens/game_screen.dart';
@@ -14,10 +15,15 @@ List<Country> _deck() => List.generate(
 );
 
 void main() {
+  // These tests exercise the live game screen — mark the first-time tutorial
+  // as already seen so its overlay never intercepts taps.
+  setUp(() => SharedPreferences.setMockInitialValues(
+      {'seen_gameplay_tutorial': true}));
+
   testWidgets('tapping outside dismisses the Smart Judge sheet (modal)', (
     tester,
   ) async {
-    const country = Country(code: 'EG', nameEn: 'Egypt', nameAr: 'مصر');
+    final country = Country(code: 'EG', nameEn: 'Egypt', nameAr: 'مصر');
     late BuildContext ctx;
     await tester.pumpWidget(
       MaterialApp(
@@ -39,7 +45,7 @@ void main() {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withValues(alpha: .55),
-      builder: (_) => const SmartJudgeSheet(country: country),
+      builder: (_) => SmartJudgeSheet(country: country),
     );
     await tester.pumpAndSettle();
     expect(find.byType(SmartJudgeSheet), findsOneWidget);
@@ -71,8 +77,11 @@ void main() {
     );
     await tester.pump();
 
+    // Bounded pumps (not pumpAndSettle): the active player's spotlight pulse
+    // animates continuously, so the tree never "settles".
     await tester.tap(find.text('اسأل الحكم الذكي'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 700)); // sheet entrance
     expect(find.byType(SmartJudgeSheet), findsOneWidget);
     expect(game.isPaused, isTrue); // auto-paused while consulting
 
@@ -109,12 +118,13 @@ void main() {
     );
     await tester.pump();
 
+    // Bounded pumps throughout (not pumpAndSettle): the spotlight pulse and,
+    // after closing, the resumed turn timer never let the tree "settle".
     await tester.tap(find.text('اسأل الحكم الذكي'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 700)); // sheet entrance
     expect(find.byType(SmartJudgeSheet), findsOneWidget);
 
-    // Bounded pumps (not pumpAndSettle): closing resumes the turn timer,
-    // whose 1-second ticks never let the tree "settle".
     await tester.drag(find.byType(SmartJudgeSheet), const Offset(0, 400));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600)); // close animation

@@ -27,6 +27,16 @@ abstract final class AppColors {
 
   static const textPrimary = Color(0xFFF4F5F7);
   static const textSecondary = Color(0xFF9AA3B2);
+
+  /// Per-player neon identity (seat order): cyan, purple, neon green,
+  /// neon pink. Shared by the setup fields and the in-game scoreboard so a
+  /// player's color follows them from the lobby into the match.
+  static const playerAccents = [
+    Color(0xFF22D3EE),
+    Color(0xFFA855F7),
+    Color(0xFF34F58A),
+    Color(0xFFFF4FD8),
+  ];
 }
 
 abstract final class AppGradients {

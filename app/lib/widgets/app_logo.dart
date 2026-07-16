@@ -1,47 +1,127 @@
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import 'launcher_icon.dart';
 
-/// The بدون هبد! brand mark — a claim being judged:
-/// a neon speech bubble (the spoken "fact") holding a bold emerald verdict
-/// check, with a ruby ✗ badge bursting off its corner (the "هبد!" getting
-/// caught) and amber impact sparks for party-game energy.
+/// The بدون هبد! brand mark — the same **crossed neon flags** as the phone's
+/// launcher icon: cyan vs purple flags with glowing poles and waving
+/// pennants (the country challenge), and a neon amber "!" at the
+/// intersection (the "هبد!" spark).
 ///
-/// Drawn entirely with [CustomPainter]: no image assets, scales losslessly to
-/// any size, and the neon intensity is externally animatable via [glow]
-/// (0 → dim, 1 → full pulse) so splash/idle screens can "breathe" it.
-class AppLogo extends StatelessWidget {
+/// The artwork is [NeonFlagsEmblem] — shared with [LauncherIconPainter] — so
+/// the in-app logo and the home-screen icon are pixel-identical. Drawn
+/// entirely in code: no image assets, scales losslessly to any size.
+///
+/// Neon intensity is controlled by [glow] (0 → dim, 1 → full) and can be
+/// driven two ways:
+/// - externally, by animating [glow] from a parent (the splash screen does
+///   this); or
+/// - internally, with [animate] — the logo idles with a slow breathing pulse
+///   (glow + halo + a whisper of scale) so static screens feel alive.
+class AppLogo extends StatefulWidget {
   final double size;
 
-  /// Neon intensity 0..1 — drive this from an animation for a pulse effect.
+  /// Neon intensity 0..1. With [animate] on, this is the pulse's PEAK.
   final double glow;
 
   /// When false, the rounded gradient-border badge is omitted and only the
-  /// bubble/verdict emblem is drawn (transparent behind it). Used for the
-  /// Android adaptive-icon foreground and for embedding the emblem on an
-  /// existing gradient capsule (e.g. the home screen).
+  /// crossed-flags emblem is drawn (transparent behind it). Used for
+  /// embedding the emblem on an existing gradient capsule (e.g. the home
+  /// screen).
   final bool showBadge;
+
+  /// Self-driving idle breathing. Leave false when a parent already animates
+  /// [glow] (e.g. the splash), so the two pulses don't fight.
+  final bool animate;
 
   const AppLogo({
     super.key,
     this.size = 120,
     this.glow = .8,
     this.showBadge = true,
+    this.animate = false,
   });
 
   @override
+  State<AppLogo> createState() => _AppLogoState();
+}
+
+class _AppLogoState extends State<AppLogo>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _breath = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2600),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animate) _breath.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(AppLogo old) {
+    super.didUpdateWidget(old);
+    if (widget.animate && !_breath.isAnimating) {
+      _breath.repeat(reverse: true);
+    } else if (!widget.animate && _breath.isAnimating) {
+      _breath
+        ..stop()
+        ..value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _breath.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return RepaintBoundary(
-      // Isolates frequent glow repaints from the rest of the tree.
-      child: CustomPaint(
-        size: Size.square(size),
-        painter: _LogoPainter(
-          glow: glow.clamp(0.0, 1.0).toDouble(),
-          showBadge: showBadge,
+    final clampedGlow = widget.glow.clamp(0.0, 1.0).toDouble();
+
+    if (!widget.animate) {
+      return RepaintBoundary(
+        // Isolates glow repaints from the rest of the tree.
+        child: CustomPaint(
+          size: Size.square(widget.size),
+          painter: _LogoPainter(glow: clampedGlow, showBadge: widget.showBadge),
         ),
+      );
+    }
+
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _breath,
+        builder: (context, _) {
+          final t = Curves.easeInOut.transform(_breath.value);
+          // Breathe between 62% and 100% of the requested peak glow.
+          final g = clampedGlow * (0.62 + 0.38 * t);
+          return Transform.scale(
+            scale: 1.0 + 0.015 * t, // barely-there inhale
+            child: Container(
+              // Soft ambient halo that swells with the breath.
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color:
+                        AppColors.neonPurple.withValues(alpha: .10 + .14 * t),
+                    blurRadius: 26 + 18 * t,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+              child: CustomPaint(
+                size: Size.square(widget.size),
+                painter: _LogoPainter(glow: g, showBadge: widget.showBadge),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -53,49 +133,35 @@ class _LogoPainter extends CustomPainter {
 
   _LogoPainter({required this.glow, this.showBadge = true});
 
-  // All geometry lives in a 100×100 design space, scaled to the actual size.
-
-  // Speech bubble body (the spoken claim).
-  static const _bubble = Rect.fromLTRB(18, 26, 82, 70);
-  static const _bubbleRadius = 14.0;
-
-  // Ruby ✗ badge riding the bubble's top-right corner.
-  static const _crossCenter = Offset(79, 24);
-  static const _crossArm = 6.5;
-  static const _crossDisc = 11.5;
-
   @override
   void paint(Canvas canvas, Size size) {
     canvas.scale(size.shortestSide / 100);
-    if (showBadge) _paintBadge(canvas);
-    _paintBubble(canvas);
-    _paintCheck(canvas);
-    _paintCrossBadge(canvas);
-    _paintSparks(canvas);
-  }
-
-  /// Neon technique: a wide blurred pass in the accent color underneath a
-  /// crisp, slightly whitened core stroke on top.
-  void _neonPath(Canvas c, Path path, Color color, double width) {
-    c.drawPath(
-      path,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = width * 2.4
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..color = color.withValues(alpha: .45 * glow)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3.5),
-    );
-    c.drawPath(
-      path,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = width
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..color = Color.lerp(color, Colors.white, .30)!,
-    );
+    if (showBadge) {
+      _paintBadge(canvas);
+    } else {
+      // Badge-less: a soft dark vignette behind the emblem so the neon
+      // reads crisply even on a bright host surface (the home screen's
+      // gradient capsule).
+      canvas.drawCircle(
+        const Offset(50, 52),
+        46,
+        Paint()
+          ..shader = ui.Gradient.radial(
+            const Offset(50, 52),
+            46,
+            [
+              Colors.black.withValues(alpha: .38),
+              Colors.black.withValues(alpha: 0),
+            ],
+          ),
+      );
+    }
+    // Inset the shared emblem so the flag tips clear the badge border (or
+    // the host capsule's rounded corners when the badge is off).
+    canvas.translate(50, 50);
+    canvas.scale(showBadge ? .82 : .96);
+    canvas.translate(-50, -50);
+    NeonFlagsEmblem.paint(canvas, glow: glow);
   }
 
   void _paintBadge(Canvas c) {
@@ -132,108 +198,6 @@ class _LogoPainter extends CustomPainter {
           [AppColors.electricBlue, AppColors.neonPurple],
         ),
     );
-  }
-
-  /// One continuous outline: rounded rect + a tail flicking down-left
-  /// (RTL-friendly — the speaker "sits" on the right-to-left reading side).
-  Path _bubblePath() {
-    const b = _bubble;
-    const r = _bubbleRadius;
-    const radius = Radius.circular(r);
-    return Path()
-      ..moveTo(b.left + r, b.top)
-      ..lineTo(b.right - r, b.top)
-      ..arcToPoint(Offset(b.right, b.top + r), radius: radius)
-      ..lineTo(b.right, b.bottom - r)
-      ..arcToPoint(Offset(b.right - r, b.bottom), radius: radius)
-      // Bottom edge runs right→left, detours through the tail, and returns.
-      ..lineTo(46, b.bottom)
-      ..lineTo(30, 84) // tail tip
-      ..lineTo(34, b.bottom)
-      ..lineTo(b.left + r, b.bottom)
-      ..arcToPoint(Offset(b.left, b.bottom - r), radius: radius)
-      ..lineTo(b.left, b.top + r)
-      ..arcToPoint(Offset(b.left + r, b.top), radius: radius)
-      ..close();
-  }
-
-  void _paintBubble(Canvas c) {
-    // Whisper of a fill so the bubble reads as a surface, not just wire.
-    c.drawPath(
-      _bubblePath(),
-      Paint()
-        ..shader = ui.Gradient.linear(
-          const Offset(18, 26),
-          const Offset(82, 70),
-          [
-            AppColors.electricBlue.withValues(alpha: .10 * glow),
-            AppColors.neonPurple.withValues(alpha: .06 * glow),
-          ],
-        ),
-    );
-    _neonPath(c, _bubblePath(), AppColors.electricBlue, 2.4);
-  }
-
-  /// The verdict: a bold emerald check filling the bubble.
-  void _paintCheck(Canvas c) {
-    final check = Path()
-      ..moveTo(34, 48)
-      ..lineTo(45, 59)
-      ..lineTo(66, 37);
-    _neonPath(c, check, AppColors.emerald, 5);
-  }
-
-  /// The busted claim: a ruby ✗ pinned to the bubble's corner like a
-  /// notification badge.
-  void _paintCrossBadge(Canvas c) {
-    // Dark disc lifts the ✗ off the bubble outline behind it.
-    c.drawCircle(
-      _crossCenter,
-      _crossDisc,
-      Paint()..color = const Color(0xFF15171F),
-    );
-    c.drawCircle(
-      _crossCenter,
-      _crossDisc,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.6
-        ..color = AppColors.ruby.withValues(alpha: .55),
-    );
-    final cross = Path()
-      ..moveTo(_crossCenter.dx - _crossArm, _crossCenter.dy - _crossArm)
-      ..lineTo(_crossCenter.dx + _crossArm, _crossCenter.dy + _crossArm)
-      ..moveTo(_crossCenter.dx + _crossArm, _crossCenter.dy - _crossArm)
-      ..lineTo(_crossCenter.dx - _crossArm, _crossCenter.dy + _crossArm);
-    _neonPath(c, cross, AppColors.ruby, 3.4);
-  }
-
-  /// Amber impact sparks fanning off the ✗ — the "هبد!" exclamation energy.
-  void _paintSparks(Canvas c) {
-    for (final angleDeg in const [-55.0, -10.0, 35.0]) {
-      final a = angleDeg * math.pi / 180;
-      final dir = Offset(math.cos(a), math.sin(a));
-      final from = _crossCenter + dir * (_crossDisc + 2.5);
-      final to = _crossCenter + dir * (_crossDisc + 8.5);
-      c.drawLine(
-        from,
-        to,
-        Paint()
-          ..strokeWidth = 3.4
-          ..strokeCap = StrokeCap.round
-          ..color = AppColors.amber.withValues(alpha: .40 * glow)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5),
-      );
-      c.drawLine(
-        from,
-        to,
-        Paint()
-          ..strokeWidth = 1.6
-          ..strokeCap = StrokeCap.round
-          ..color = Color.lerp(AppColors.amber, Colors.white, .35)!
-              .withValues(alpha: (.55 + .45 * glow).clamp(0.0, 1.0).toDouble()),
-      );
-    }
   }
 
   @override

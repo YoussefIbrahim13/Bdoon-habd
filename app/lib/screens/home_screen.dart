@@ -26,14 +26,27 @@ class _HomeScreenState extends State<HomeScreen> {
   ];
   static const _defaultNames = ['لاعب ١', 'لاعب ٢', 'لاعب ٣', 'لاعب ٤'];
 
+  // Per-player neon identity comes from the shared theme token so the same
+  // color follows each player onto the in-game scoreboard.
+
   /// One controller per possible seat, created eagerly so a player's typed
-  /// name survives toggling the count down and back up.
+  /// name survives toggling the count down and back up. Empty by default —
+  /// the seat's default name shows as hint text, and _start() falls back to
+  /// it if the field is left blank.
   final List<TextEditingController> _nameControllers = [
-    for (final name in _defaultNames) TextEditingController(text: name),
+    for (var i = 0; i < 4; i++) TextEditingController(),
   ];
 
   int _playerCount = GameState.defaultPlayers;
   int _targetScore = 5;
+  CountryDifficulty _difficulty = CountryDifficulty.easy;
+
+  /// Neon vibe per difficulty tier: easy=green, medium=amber, hard=crimson.
+  static const _difficultyAccents = [
+    AppColors.emerald,
+    AppColors.amber,
+    AppColors.ruby,
+  ];
 
   List<Country>? _countries;
   String? _error;
@@ -88,6 +101,7 @@ class _HomeScreenState extends State<HomeScreen> {
           names: names,
           target: _targetScore,
           countries: _countries!,
+          difficulty: _difficulty,
         );
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const GameScreen()),
@@ -124,13 +138,15 @@ class _HomeScreenState extends State<HomeScreen> {
                                 alpha: .5, blur: 34),
                           ),
                           // Brand emblem without its own badge — it sits on
-                          // this gradient capsule instead.
+                          // this gradient capsule and idles with its own
+                          // breathing pulse.
                           child: const Center(
-                            child: AppLogo(size: 68, showBadge: false),
+                            child:
+                                AppLogo(size: 68, showBadge: false, animate: true),
                           ),
                         ),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 22),
                       ShaderMask(
                         shaderCallback: (r) => AppGradients.turn.createShader(r),
                         child: Text(
@@ -140,48 +156,76 @@ class _HomeScreenState extends State<HomeScreen> {
                               size: 40, weight: FontWeight.w800, color: Colors.white),
                         ),
                       ),
+                      const SizedBox(height: 2),
                       Text(
                         'لعبة معلومات البلاد — من ٢ إلى ٤ لاعبين وحكم واحد',
                         textAlign: TextAlign.center,
                         style: AppText.ui(size: 14, color: AppColors.textSecondary),
                       ),
-                      const SizedBox(height: 32),
-                      GlassContainer(
-                        padding: const EdgeInsets.all(18),
+                      const SizedBox(height: 30),
+                      _SetupCard(
                         child: Column(
                           children: [
-                            _PlayerCountPicker(
-                              value: _playerCount,
-                              onChanged: (v) => setState(() => _playerCount = v),
+                            _PickerRow(
+                              label: 'عدد اللاعبين',
+                              child: _SlidingSegments(
+                                labels: const ['2', '3', '4'],
+                                selectedIndex:
+                                    _playerCount - GameState.minPlayers,
+                                onSelected: (i) => setState(() =>
+                                    _playerCount = GameState.minPlayers + i),
+                              ),
                             ),
-                            const SizedBox(height: 18),
-                            // AnimatedSize glides the card open/closed as
-                            // fields appear or disappear with the count.
+                            const SizedBox(height: 20),
+                            // fastOutSlowIn: settles without the overshoot
+                            // clipping that easeOutBack causes inside a
+                            // clipping AnimatedSize.
                             AnimatedSize(
-                              duration: const Duration(milliseconds: 280),
-                              curve: Curves.easeOutCubic,
+                              duration: const Duration(milliseconds: 340),
+                              curve: Curves.fastOutSlowIn,
                               alignment: Alignment.topCenter,
                               child: Column(
                                 children: [
                                   for (var i = 0; i < _playerCount; i++) ...[
-                                    _LabeledField(
+                                    _PlayerField(
                                       label: _fieldLabels[i],
+                                      hint: _defaultNames[i],
                                       controller: _nameControllers[i],
+                                      accent: AppColors.playerAccents[i],
                                     ),
-                                    const SizedBox(height: 14),
+                                    const SizedBox(height: 12),
                                   ],
                                 ],
                               ),
                             ),
-                            const SizedBox(height: 4),
-                            _TargetPicker(
-                              value: _targetScore,
-                              onChanged: (v) => setState(() => _targetScore = v),
+                            // Generous breathing room before the target row.
+                            const SizedBox(height: 12),
+                            _PickerRow(
+                              label: 'الفوز عند',
+                              child: _SlidingSegments(
+                                labels: const ['1', '3', '5', '7', '10'],
+                                selectedIndex:
+                                    _targetOptions.indexOf(_targetScore),
+                                onSelected: (i) => setState(
+                                    () => _targetScore = _targetOptions[i]),
+                              ),
+                            ),
+                            const SizedBox(height: 18),
+                            _PickerRow(
+                              label: 'درجة الصعوبة',
+                              child: _SlidingSegments(
+                                labels: const ['سهل', 'متوسط', 'صعب'],
+                                arabicLabels: true,
+                                accents: _difficultyAccents,
+                                selectedIndex: _difficulty.index,
+                                onSelected: (i) => setState(() => _difficulty =
+                                    CountryDifficulty.values[i]),
+                              ),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 26),
                       if (_loading)
                         const Padding(
                           padding: EdgeInsets.all(16),
@@ -219,166 +263,323 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  static const _targetOptions = [1, 3, 5, 7, 10];
 }
 
-/// "عدد اللاعبين" pill row (٢ / ٣ / ٤) in the same segment style as the
-/// target-score picker, so the setup card reads as one system.
-class _PlayerCountPicker extends StatelessWidget {
-  final int value;
-  final ValueChanged<int> onChanged;
+/// The setup card: deeper frosted glass wrapped in a fine blue→purple
+/// gradient ring, floated on soft black + faint neon shadows so it lifts
+/// cleanly off the ambient background.
+class _SetupCard extends StatelessWidget {
+  final Widget child;
 
-  const _PlayerCountPicker({required this.value, required this.onChanged});
-
-  static const _arabicDigits = {2: '٢', 3: '٣', 4: '٤'};
+  const _SetupCard({required this.child});
 
   @override
   Widget build(BuildContext context) {
-    // Fluid pills (like _TargetPicker) so the row can never overflow on
-    // narrow phones regardless of the label's rendered width.
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadii.card + 1.4),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.electricBlue.withValues(alpha: .45),
+            AppColors.stroke,
+            AppColors.neonPurple.withValues(alpha: .45),
+          ],
+        ),
+        boxShadow: [
+          ...AppShadows.soft,
+          BoxShadow(
+            color: AppColors.neonPurple.withValues(alpha: .10),
+            blurRadius: 44,
+            offset: const Offset(0, 16),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(1.4),
+      child: GlassContainer(
+        blur: 26,
+        radius: AppRadii.card,
+        padding: const EdgeInsets.fromLTRB(20, 22, 20, 22),
+        child: child,
+      ),
+    );
+  }
+}
+
+/// Label + fluid control on one line ("عدد اللاعبين", "الفوز عند").
+class _PickerRow extends StatelessWidget {
+  final String label;
+  final Widget child;
+
+  const _PickerRow({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
     return Row(
       children: [
         Padding(
           padding: const EdgeInsets.only(right: 4),
-          child: Text('عدد اللاعبين',
+          child: Text(label,
               style: AppText.ui(size: 12.5, color: AppColors.textSecondary)),
         ),
         const SizedBox(width: 12),
-        Expanded(
-          child: Row(
-            children: [
-              for (var count = GameState.minPlayers;
-                  count <= GameState.maxPlayers;
-                  count++) ...[
-                if (count > GameState.minPlayers) const SizedBox(width: 6),
-                Expanded(
-                  child: _Segment(
-                    label: _arabicDigits[count] ?? '$count',
-                    width: null, // fluid: fill the Expanded slot
-                    selected: count == value,
-                    onTap: () => onChanged(count),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
+        Expanded(child: child),
       ],
     );
   }
 }
 
-class _LabeledField extends StatelessWidget {
-  final String label;
-  final TextEditingController controller;
+/// Segmented control with a gradient pill that GLIDES behind the selected
+/// option (AnimatedPositionedDirectional) instead of each segment swapping
+/// its own background. Slots share the track width fluidly, so any count of
+/// options fits any screen width without overflowing.
+class _SlidingSegments extends StatelessWidget {
+  final List<String> labels;
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
 
-  const _LabeledField({required this.label, required this.controller});
+  /// Optional per-option accent (same length as [labels]): the glider's fill
+  /// and glow take the selected option's color instead of the brand
+  /// blue→purple. Used by the difficulty picker (green/amber/crimson).
+  final List<Color>? accents;
+
+  /// Arabic labels render in Cairo ([AppText.ui]) — Outfit has no Arabic
+  /// glyphs. Digits keep the default Outfit ([AppText.number]).
+  final bool arabicLabels;
+
+  const _SlidingSegments({
+    required this.labels,
+    required this.selectedIndex,
+    required this.onSelected,
+    this.accents,
+    this.arabicLabels = false,
+  });
+
+  static const _gap = 5.0;
+  static const _inset = 4.0;
 
   @override
   Widget build(BuildContext context) {
+    return Container(
+      height: 50,
+      padding: const EdgeInsets.all(_inset),
+      decoration: BoxDecoration(
+        color: AppColors.glassFill,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.stroke),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final n = labels.length;
+          final slotWidth =
+              (constraints.maxWidth - _gap * (n - 1)) / n;
+          return Stack(
+            children: [
+              // The glider. Directional start: in this RTL app it measures
+              // from the right edge, matching the RTL row order below.
+              AnimatedPositionedDirectional(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.fastOutSlowIn,
+                start: selectedIndex * (slotWidth + _gap),
+                top: 0,
+                bottom: 0,
+                width: slotWidth,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  decoration: BoxDecoration(
+                    gradient: accents == null
+                        ? AppGradients.turn
+                        : LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              accents![selectedIndex],
+                              Color.lerp(accents![selectedIndex],
+                                  Colors.black, .30)!,
+                            ],
+                          ),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: AppShadows.glow(
+                        accents?[selectedIndex] ?? AppColors.electricBlue,
+                        alpha: .35,
+                        blur: 14),
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  for (var i = 0; i < n; i++) ...[
+                    if (i > 0) const SizedBox(width: _gap),
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => onSelected(i),
+                        child: Center(
+                          child: AnimatedDefaultTextStyle(
+                            duration: const Duration(milliseconds: 220),
+                            style: arabicLabels
+                                ? AppText.ui(
+                                    size: 13,
+                                    weight: FontWeight.w800,
+                                    color: i == selectedIndex
+                                        ? Colors.white
+                                        : AppColors.textSecondary,
+                                  )
+                                : AppText.number(
+                                    size: 17,
+                                    weight: FontWeight.w700,
+                                    color: i == selectedIndex
+                                        ? Colors.white
+                                        : AppColors.textSecondary,
+                                  ),
+                            child: Text(labels[i]),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Player name field with a neon identity: a 4px accent strip on the
+/// physical left edge, an accent-tinted border, and a soft animated glow
+/// that blooms while the field is focused.
+class _PlayerField extends StatefulWidget {
+  final String label;
+
+  /// Watermark shown while the field is empty (the seat's default name).
+  final String hint;
+  final TextEditingController controller;
+  final Color accent;
+
+  const _PlayerField({
+    required this.label,
+    required this.hint,
+    required this.controller,
+    required this.accent,
+  });
+
+  @override
+  State<_PlayerField> createState() => _PlayerFieldState();
+}
+
+class _PlayerFieldState extends State<_PlayerField> {
+  final FocusNode _focus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(_onFocusChanged);
+  }
+
+  void _onFocusChanged() => setState(() {});
+
+  @override
+  void dispose() {
+    _focus
+      ..removeListener(_onFocusChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = widget.accent;
+    final focused = _focus.hasFocus;
+    final radius = BorderRadius.circular(AppRadii.field);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.only(right: 4, bottom: 6),
-          child: Text(label,
-              style: AppText.ui(size: 12.5, color: AppColors.textSecondary)),
-        ),
-        TextField(
-          controller: controller,
-          style: AppText.ui(size: 15, weight: FontWeight.w700),
-          decoration: const InputDecoration(),
-        ),
-      ],
-    );
-  }
-}
-
-class _TargetPicker extends StatelessWidget {
-  final int value;
-  final ValueChanged<int> onChanged;
-
-  const _TargetPicker({required this.value, required this.onChanged});
-
-  static const _options = [1, 3, 5, 7, 10];
-
-  @override
-  Widget build(BuildContext context) {
-    // Five options: fixed 44px pills would overflow narrow phones once the
-    // label is added, so the segments share the remaining width fluidly.
-    return Row(
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(right: 4),
-          child: Text('الفوز عند',
-              style: AppText.ui(size: 12.5, color: AppColors.textSecondary)),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              for (var i = 0; i < _options.length; i++) ...[
-                if (i > 0) const SizedBox(width: 6),
-                Expanded(
-                  child: _Segment(
-                    label: '${_options[i]}',
-                    width: null, // fluid: fill the Expanded slot
-                    selected: _options[i] == value,
-                    onTap: () => onChanged(_options[i]),
-                  ),
-                ),
-              ],
+              Text(widget.label,
+                  style:
+                      AppText.ui(size: 12.5, color: AppColors.textSecondary)),
+              const SizedBox(width: 6),
+              // Tiny identity swatch beside the label.
+              Container(
+                width: 8,
+                height: 8,
+                decoration:
+                    BoxDecoration(shape: BoxShape.circle, color: accent),
+              ),
             ],
           ),
         ),
+        // Outer layer carries the focus glow (shadows can't be clipped).
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOut,
+          decoration: BoxDecoration(
+            borderRadius: radius,
+            boxShadow: focused
+                ? [
+                    BoxShadow(
+                      color: accent.withValues(alpha: .34),
+                      blurRadius: 18,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : const [],
+          ),
+          // Clip so the accent strip follows the field's rounded silhouette.
+          child: ClipRRect(
+            borderRadius: radius,
+            child: Stack(
+              children: [
+                TextField(
+                  controller: widget.controller,
+                  focusNode: _focus,
+                  style: AppText.ui(size: 15, weight: FontWeight.w700),
+                  decoration: InputDecoration(
+                    hintText: widget.hint,
+                    hintStyle: AppText.ui(
+                      size: 15,
+                      weight: FontWeight.w600,
+                      color: AppColors.textSecondary.withValues(alpha: .45),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: radius,
+                      borderSide:
+                          BorderSide(color: accent.withValues(alpha: .30)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: radius,
+                      borderSide: BorderSide(color: accent, width: 1.6),
+                    ),
+                  ),
+                ),
+                // 4px neon identity strip on the physical left edge,
+                // brightening with focus.
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: 4,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 240),
+                    color: accent.withValues(alpha: focused ? 1 : .55),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
-    );
-  }
-}
-
-class _Segment extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  /// Fixed pill width; pass null to fill the parent (fluid layouts).
-  final double? width;
-
-  const _Segment({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.width = 44,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 240),
-        curve: Curves.easeOutCubic,
-        width: width,
-        height: 44,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          gradient: selected ? AppGradients.turn : null,
-          color: selected ? null : AppColors.glassFill,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? Colors.transparent : AppColors.stroke,
-          ),
-          boxShadow:
-              selected ? AppShadows.glow(AppColors.electricBlue, alpha: .35, blur: 16) : null,
-        ),
-        child: Text(
-          label,
-          style: AppText.number(
-            size: 18,
-            weight: FontWeight.w700,
-            color: selected ? Colors.white : AppColors.textSecondary,
-          ),
-        ),
-      ),
     );
   }
 }
