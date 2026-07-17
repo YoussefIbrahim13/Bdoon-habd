@@ -8,10 +8,11 @@ import '../models/country.dart';
 /// are correct even without a --dart-define. Override for local development:
 ///   flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000   (Android emulator)
 ///   flutter run --dart-define=API_BASE_URL=http://192.168.x.x:8000 (real phone, same Wi-Fi)
-const String _baseUrl = String.fromEnvironment(
+const String apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
   defaultValue: 'https://badon-habd-api.onrender.com',
 );
+const String _baseUrl = apiBaseUrl;
 
 /// Shared secret matching the backend's APP_TOKEN env var — deters drive-by
 /// scripts from burning the Groq quota (not real auth; an APK is decompilable).

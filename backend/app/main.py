@@ -18,7 +18,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from .auth import router as auth_router
 from .countries import fact_sheet, find_country, load_countries
+from .db import init_db
 from .verifier import SmartJudge
 
 logging.basicConfig(level=logging.INFO)
@@ -63,6 +65,7 @@ class CountryOut(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_db()  # create the players table if missing (idempotent)
     app.state.countries = await load_countries()
     api_key = os.environ.get("GROQ_API_KEY")
     app.state.judge = SmartJudge(api_key)
@@ -84,6 +87,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="بدون هبد! API", version="0.1.0", lifespan=lifespan)
+app.include_router(auth_router)
 
 # Dev-friendly CORS; tighten before any public deployment.
 app.add_middleware(

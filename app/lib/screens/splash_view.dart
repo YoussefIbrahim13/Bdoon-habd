@@ -5,14 +5,15 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/glass_container.dart';
-import 'home_screen.dart';
+import 'game_mode_screen.dart';
 
 /// Animated brand splash. Fully self-contained (no assets):
 ///  - the logo scales + fades in (staggered),
 ///  - a looping neon pulse drives the logo's glow and a halo,
 ///  - the Arabic title slides up + fades,
 ///  - a Latin subtitle reveals with animated letter-spacing,
-///  - then it auto-transitions to [HomeScreen] via a fade/zoom route.
+///  - then it auto-transitions to the [GameModeScreen] gateway via a
+///    fade/zoom route.
 class SplashView extends StatefulWidget {
   const SplashView({super.key});
 
@@ -64,7 +65,8 @@ class _SplashViewState extends State<SplashView> with TickerProviderStateMixin {
 
   void _goHome() {
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(_FadeZoomRoute(const HomeScreen()));
+    Navigator.of(context)
+        .pushReplacement(_FadeZoomRoute(const GameModeScreen()));
   }
 
   @override
@@ -184,7 +186,7 @@ class _SplashViewState extends State<SplashView> with TickerProviderStateMixin {
   }
 }
 
-/// Fade + subtle zoom page transition (no abrupt jump into HomeScreen).
+/// Fade + subtle zoom page transition (no abrupt jump into the gateway).
 class _FadeZoomRoute extends PageRouteBuilder<void> {
   _FadeZoomRoute(Widget page)
       : super(

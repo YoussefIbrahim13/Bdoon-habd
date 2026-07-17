@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import 'screens/splash_view.dart';
 import 'services/api_service.dart';
+import 'services/auth_service.dart';
 import 'state/game_state.dart';
 import 'theme/app_theme.dart';
 
@@ -26,6 +27,9 @@ class BedoonHabdApp extends StatelessWidget {
       providers: [
         Provider(create: (_) => ApiService()),
         ChangeNotifierProvider(create: (_) => GameState()),
+        // Session restore kicks off immediately: by the time the splash
+        // hands over to the gateway, a persisted sign-in is already live.
+        ChangeNotifierProvider(create: (_) => AuthService()..restoreSession()),
       ],
       child: MaterialApp(
         title: 'بدون هبد!',

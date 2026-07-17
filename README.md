@@ -37,6 +37,8 @@ returns a friendly 503.
 | `GET /health` | Liveness + country count |
 | `GET /countries` | 194 countries: code, English/Arabic name, flag URLs |
 | `POST /verify-fact` | `{"country": "EG", "claim": "..."}` → `{"verdict": "true"\|"false"\|"uncertain", "explanation": "...", "source_type": "objective_data"\|"web_search"}` |
+| `POST /api/auth/google` | `{"idToken": "<Google ID token>"}` → app JWT + player profile (provisions new players; needs `GOOGLE_CLIENT_ID` + `JWT_SECRET` env) |
+| `GET /api/auth/me` | `Authorization: Bearer <app JWT>` → the signed-in player's profile |
 
 ### How verification works (hybrid, per the spec)
 

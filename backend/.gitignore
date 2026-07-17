@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+.env
+# Local SQLite player DBs — never commit player data.
+*.db

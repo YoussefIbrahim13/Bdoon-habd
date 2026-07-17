@@ -3,3 +3,8 @@ uvicorn[standard]>=0.30
 httpx>=0.27
 groq>=0.13
 python-dotenv>=1.0
+# --- Google Sign-In auth ---
+google-auth>=2.30        # official Google ID-token verification
+requests>=2.32           # transport google-auth uses to fetch Google's certs
+PyJWT>=2.9               # our own application JWTs
+SQLAlchemy>=2.0          # player accounts (SQLite locally; swap DATABASE_URL for Postgres)
