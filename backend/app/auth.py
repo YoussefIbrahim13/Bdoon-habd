@@ -199,6 +199,9 @@ def get_current_player(
     player = db.get(Player, claims["sub"])
     if player is None:
         raise HTTPException(status_code=401, detail="Unknown player.")
+    if player.deleted_at is not None:
+        # Soft-deleted mid-session: their still-valid JWT dies right here.
+        raise HTTPException(status_code=403, detail="Account disabled.")
     return player
 
 
@@ -223,6 +226,11 @@ def google_sign_in(
     player = db.execute(
         select(Player).where(Player.google_sub == sub)
     ).scalar_one_or_none()
+
+    if player is not None and player.deleted_at is not None:
+        # Soft-deleted accounts stay disabled — a fresh Google sign-in must
+        # not silently resurrect a banned/removed player.
+        raise HTTPException(status_code=403, detail="Account disabled.")
 
     if player is None:
         # First sign-in: provision the account with fresh stats.

@@ -62,10 +62,39 @@ class Player(Base):
         DateTime(timezone=True), default=utcnow
     )
 
+    # Soft delete: set instead of removing the row, so stats/history survive
+    # and accidental deletions are recoverable. Non-null ⇒ the account is
+    # disabled: hidden from admin listings and rejected by every auth guard.
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+
 
 def init_db() -> None:
-    """Create tables on startup (idempotent)."""
+    """Create tables on startup (idempotent), plus micro-migrations.
+
+    create_all only creates MISSING tables — it never alters existing ones —
+    so columns added after a table shipped need explicit ADD COLUMN guards.
+    """
     Base.metadata.create_all(_engine)
+    with _engine.connect() as conn:
+        existing = {
+            row[1]  # (cid, name, type, ...) for SQLite PRAGMA
+            for row in conn.exec_driver_sql(
+                "PRAGMA table_info(players)"
+            ).fetchall()
+        } if DATABASE_URL.startswith("sqlite") else {
+            row[0]
+            for row in conn.exec_driver_sql(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'players'"
+            ).fetchall()
+        }
+        if "deleted_at" not in existing:
+            conn.exec_driver_sql(
+                "ALTER TABLE players ADD COLUMN deleted_at TIMESTAMP NULL"
+            )
+            conn.commit()
 
 
 def get_db() -> Iterator[Session]:

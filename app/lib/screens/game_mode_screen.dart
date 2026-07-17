@@ -13,8 +13,8 @@ import 'sign_in_screen.dart';
 ///
 /// - "لعب أوفلاين" (neon-cyan) → the existing local pass-and-play lobby
 ///   ([HomeScreen]).
-/// - "لعب أونلاين" (neon-magenta) → coming soon; locked with a pulsing tag
-///   and a teaser snackbar.
+/// - "لعب أونلاين" (neon-magenta) → Google Sign-In gateway when signed out;
+///   the online experience (in active development) when signed in.
 ///
 /// The obsidian background carries two slow-drifting radial glows (cyan +
 /// purple) on a single long-running controller, isolated behind a
@@ -114,19 +114,15 @@ class _GameModeScreenState extends State<GameModeScreen>
                               'باس-آند-بلاي محلي: لاعيبة في نفس الأوضة وحكم واحد ماسك الموبايل.',
                           onTap: _openOffline,
                         ),
-                        // Signed in → unlocked identity card (mode itself
-                        // still shipping); signed out → locked, tap opens
-                        // the Google Sign-In gateway.
+                        // Signed out → tap opens the Google Sign-In gateway;
+                        // signed in → straight into the online experience.
                         _ModeCard(
                           accent: const Color(0xFFE45CFF),
                           icon: Icons.public_rounded,
-                          title: signedIn
-                              ? 'لعب أونلاين'
-                              : 'لعب أونلاين (قريباً)',
+                          title: 'لعب أونلاين',
                           subtitle: signedIn
-                              ? 'متصل كـ ${playerName ?? ''} ✔ — أول بطولات الأونلاين توصلك قريب جداً.'
-                              : 'سجّل دخولك بجوجل واحجز مكانك — تحدّي الأصحاب عبر الشبكة جاي في الفرن.',
-                          locked: !signedIn,
+                              ? 'متصل كـ ${playerName ?? ''} ✔ — جاهز لتحدي أصحابك عبر الشبكة.'
+                              : 'سجّل دخولك بجوجل وادخل تحديات الأونلاين.',
                           onTap: _onOnlineTap,
                         ),
                       ];
@@ -267,13 +263,12 @@ class _GlowBlob extends StatelessWidget {
 }
 
 /// One massive mode card: accent-ringed glass, glowing icon capsule, title,
-/// subtitle, and (for locked modes) a lock badge + pulsing "✨ قريباً" tag.
+/// and subtitle.
 class _ModeCard extends StatefulWidget {
   final Color accent;
   final IconData icon;
   final String title;
   final String subtitle;
-  final bool locked;
   final VoidCallback onTap;
 
   const _ModeCard({
@@ -282,7 +277,6 @@ class _ModeCard extends StatefulWidget {
     required this.title,
     required this.subtitle,
     required this.onTap,
-    this.locked = false,
   });
 
   @override
@@ -341,53 +335,28 @@ class _ModeCardState extends State<_ModeCard> {
             ),
             child: Column(
               children: [
-                // Glowing icon capsule (dimmed + lock badge when locked).
-                Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Container(
-                      width: 66,
-                      height: 66,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        color: accent.withValues(alpha: .12),
-                        border: Border.all(
-                          color: accent.withValues(alpha: .55),
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: accent.withValues(alpha: .30),
-                            blurRadius: 22,
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        widget.icon,
-                        size: 32,
-                        color: Color.lerp(accent, Colors.white, .35),
-                      ),
+                // Glowing icon capsule.
+                Container(
+                  width: 66,
+                  height: 66,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    color: accent.withValues(alpha: .12),
+                    border: Border.all(
+                      color: accent.withValues(alpha: .55),
                     ),
-                    if (widget.locked)
-                      Positioned(
-                        top: -6,
-                        left: -6,
-                        child: Container(
-                          padding: const EdgeInsets.all(5),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: const Color(0xFF14161F),
-                            border: Border.all(
-                              color: accent.withValues(alpha: .6),
-                            ),
-                          ),
-                          child: Icon(
-                            Icons.lock_rounded,
-                            size: 13,
-                            color: accent,
-                          ),
-                        ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: accent.withValues(alpha: .30),
+                        blurRadius: 22,
                       ),
-                  ],
+                    ],
+                  ),
+                  child: Icon(
+                    widget.icon,
+                    size: 32,
+                    color: Color.lerp(accent, Colors.white, .35),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -405,10 +374,6 @@ class _ModeCardState extends State<_ModeCard> {
                     color: AppColors.textSecondary,
                   ),
                 ),
-                if (widget.locked) ...[
-                  const SizedBox(height: 14),
-                  _PulsingTag(accent: accent),
-                ],
               ],
             ),
           ),
@@ -418,61 +383,3 @@ class _ModeCardState extends State<_ModeCard> {
   }
 }
 
-/// "✨ قريباً" chip breathing its glow — the promise of the online mode.
-class _PulsingTag extends StatefulWidget {
-  final Color accent;
-
-  const _PulsingTag({required this.accent});
-
-  @override
-  State<_PulsingTag> createState() => _PulsingTagState();
-}
-
-class _PulsingTagState extends State<_PulsingTag>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1500),
-  )..repeat(reverse: true);
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = widget.accent;
-    return AnimatedBuilder(
-      animation: _pulse,
-      builder: (context, _) {
-        final t = Curves.easeInOut.transform(_pulse.value);
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(999),
-            color: accent.withValues(alpha: .10 + .06 * t),
-            border: Border.all(
-              color: accent.withValues(alpha: .45 + .40 * t),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: accent.withValues(alpha: .18 + .22 * t),
-                blurRadius: 12 + 8 * t,
-              ),
-            ],
-          ),
-          child: Text(
-            '✨ قريباً',
-            style: AppText.ui(
-              size: 12.5,
-              weight: FontWeight.w800,
-              color: Color.lerp(accent, Colors.white, .45)!,
-            ),
-          ),
-        );
-      },
-    );
-  }
-}

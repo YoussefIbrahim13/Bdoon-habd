@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from .admin import router as admin_router
 from .auth import router as auth_router
 from .countries import fact_sheet, find_country, load_countries
 from .db import init_db
@@ -88,6 +89,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="بدون هبد! API", version="0.1.0", lifespan=lifespan)
 app.include_router(auth_router)
+app.include_router(admin_router)
 
 # Dev-friendly CORS; tighten before any public deployment.
 app.add_middleware(

@@ -56,14 +56,17 @@ void main() {
   // "قريباً" tag pulse animate forever, so the tree never settles.
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  testWidgets('gateway shows both mode cards (signed out)', (tester) async {
+  testWidgets('gateway shows both mode cards, no coming-soon dressing',
+      (tester) async {
     final (game, _) = await _pump(tester);
     addTearDown(game.dispose);
 
     expect(find.text('لعب أوفلاين'), findsOneWidget);
-    expect(find.text('لعب أونلاين (قريباً)'), findsOneWidget);
-    expect(find.text('✨ قريباً'), findsOneWidget);
+    expect(find.text('لعب أونلاين'), findsOneWidget);
     expect(find.text('اختار طريقة اللعب'), findsOneWidget);
+    // The "coming soon" era is over: no tag, no lock, no suffix.
+    expect(find.textContaining('قريباً'), findsNothing);
+    expect(find.byIcon(Icons.lock_rounded), findsNothing);
     expect(find.text('تسجيل الخروج'), findsNothing);
   });
 
@@ -72,7 +75,7 @@ void main() {
     final (game, _) = await _pump(tester);
     addTearDown(game.dispose);
 
-    await tester.tap(find.text('لعب أونلاين (قريباً)'));
+    await tester.tap(find.text('لعب أونلاين'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600)); // route transition
 
@@ -80,25 +83,24 @@ void main() {
     expect(find.text('تسجيل الدخول باستخدام جوجل'), findsOneWidget);
   });
 
-  testWidgets('signed in: online card is unlocked and teases the mode',
+  testWidgets('signed in: online card shows the player identity',
       (tester) async {
     _seedSignedInPrefs();
     final (game, auth) = await _pump(tester);
     addTearDown(game.dispose);
     expect(auth.isSignedIn, isTrue);
 
-    expect(find.text('لعب أونلاين'), findsOneWidget); // no (قريباً) suffix
+    expect(find.text('لعب أونلاين'), findsOneWidget);
     expect(find.textContaining('متصل كـ Karim'), findsOneWidget);
     expect(find.text('تسجيل الخروج'), findsOneWidget);
 
     await tester.tap(find.text('لعب أونلاين'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(
-      find.textContaining('طور الأونلاين قادم في التحديث القادم'),
-      findsOneWidget,
-    );
+    // Interim behavior until the online lobby screen ships: no navigation
+    // away, and no sign-in prompt for an already-signed-in player.
     expect(find.byType(SignInScreen), findsNothing);
+    expect(find.byType(GameModeScreen), findsOneWidget);
   });
 
   testWidgets('offline card navigates to the lobby', (tester) async {
@@ -117,7 +119,7 @@ void main() {
     final (game, _) = await _pump(tester);
     addTearDown(game.dispose);
 
-    await tester.tap(find.text('لعب أونلاين (قريباً)'));
+    await tester.tap(find.text('لعب أونلاين'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
 

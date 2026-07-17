@@ -71,10 +71,15 @@ class AuthService extends ChangeNotifier {
 
   /// The backend's GOOGLE_CLIENT_ID (a *Web* OAuth client) — Google only
   /// puts an `idToken` audience we can verify server-side when the mobile
-  /// sign-in names it as the serverClientId. Bake it in at build time:
+  /// sign-in names it as the serverClientId. Client IDs are public by design
+  /// (they ship inside every APK), so the production value is safe as the
+  /// baked-in default; override for another Google project with:
   ///   flutter run --dart-define=GOOGLE_SERVER_CLIENT_ID=xxxx.apps.googleusercontent.com
-  static const _serverClientId =
-      String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID');
+  static const _serverClientId = String.fromEnvironment(
+    'GOOGLE_SERVER_CLIENT_ID',
+    defaultValue:
+        '572748761857-ghehmq2shdql97qgva170j7kp3i8ngb5.apps.googleusercontent.com',
+  );
 
   final http.Client _client;
   final Future<String?> Function() _idTokenProvider;
@@ -140,21 +145,34 @@ class AuthService extends ChangeNotifier {
     _status = AuthStatus.signingIn;
     notifyListeners();
 
+    // Step 1: the Google popup. Failures here are configuration problems
+    // (SHA-1/package mismatch, Play Services), not server problems — report
+    // them distinctly so they're debuggable.
+    final String? idToken;
     try {
-      final idToken = await _idTokenProvider();
-      if (idToken == null) {
-        _status = AuthStatus.signedOut;
-        notifyListeners();
-        return SignInResult.cancelled;
-      }
+      idToken = await _idTokenProvider();
+    } catch (_) {
+      _lastError = 'فشل تسجيل الدخول بجوجل — اتأكد من خدمات Google وجرّب تاني';
+      _status = AuthStatus.signedOut;
+      notifyListeners();
+      return SignInResult.failed;
+    }
+    if (idToken == null) {
+      _status = AuthStatus.signedOut;
+      notifyListeners();
+      return SignInResult.cancelled;
+    }
 
+    // Step 2: exchange with our backend. Generous timeout: the Render free
+    // tier sleeps after idle and a cold start can take ~a minute.
+    try {
       final resp = await _client
           .post(
             Uri.parse('$apiBaseUrl/api/auth/google'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'idToken': idToken}),
           )
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 75));
 
       if (resp.statusCode != 200) {
         _lastError = _detailFrom(resp) ?? 'فشل تسجيل الدخول (${resp.statusCode})';
@@ -171,7 +189,8 @@ class AuthService extends ChangeNotifier {
       notifyListeners();
       return SignInResult.success;
     } catch (e) {
-      _lastError = 'تعذّر الاتصال بالسيرفر — جرّب تاني';
+      _lastError =
+          'السيرفر بياخد وقته يصحى — استنى ثواني وجرّب تاني (أول محاولة بتصحّي السيرفر المجاني)';
       _status = AuthStatus.signedOut;
       notifyListeners();
       return SignInResult.failed;

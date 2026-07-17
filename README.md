@@ -39,6 +39,8 @@ returns a friendly 503.
 | `POST /verify-fact` | `{"country": "EG", "claim": "..."}` → `{"verdict": "true"\|"false"\|"uncertain", "explanation": "...", "source_type": "objective_data"\|"web_search"}` |
 | `POST /api/auth/google` | `{"idToken": "<Google ID token>"}` → app JWT + player profile (provisions new players; needs `GOOGLE_CLIENT_ID` + `JWT_SECRET` env) |
 | `GET /api/auth/me` | `Authorization: Bearer <app JWT>` → the signed-in player's profile |
+| `GET /api/admin/players` | `X-Admin-Token` header → all players (profile + stats); disabled unless `ADMIN_TOKEN` env is set |
+| `DELETE /api/admin/players/{id}` | `X-Admin-Token` header → delete a player by UUID (404 if unknown) |
 
 ### How verification works (hybrid, per the spec)
 
