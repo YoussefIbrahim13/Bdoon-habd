@@ -8,3 +8,4 @@ google-auth>=2.30        # official Google ID-token verification
 requests>=2.32           # transport google-auth uses to fetch Google's certs
 PyJWT>=2.9               # our own application JWTs
 SQLAlchemy>=2.0          # player accounts (SQLite locally; swap DATABASE_URL for Postgres)
+psycopg2-binary>=2.9     # PostgreSQL driver for the hosted production DB
