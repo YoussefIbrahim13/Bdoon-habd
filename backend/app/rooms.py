@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import secrets
 import time
 from collections.abc import Awaitable, Callable
@@ -38,7 +39,17 @@ logger = logging.getLogger(__name__)
 
 ROOM_CODE_LENGTH = 6
 MAX_PLAYERS = 8
-MIN_PLAYERS_TO_START = 2
+
+# Minimum connected players required to start a match (also the threshold
+# below which a running match ends early when people disconnect).
+#
+# PRODUCTION default is 2. For solo development/testing of the full loop
+# (lobby → fact → AI → voting → game over), override via the environment
+# instead of editing code — put `MIN_PLAYERS_TO_START=1` in backend/.env.
+# Deployments without the env var automatically get the safe default, so
+# there is nothing to remember to switch back.
+MIN_PLAYERS_TO_START = max(1, int(os.environ.get("MIN_PLAYERS_TO_START", "2")))
+
 DEFAULT_TARGET_SCORE = 5
 MAX_FACT_LENGTH = 300
 
