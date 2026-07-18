@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -45,6 +47,7 @@ class _GameRoomViewState extends State<_GameRoomView> {
   late final GameRoomState _room;
   int _seenRounds = 0;
   int _seenErrors = 0;
+  int _seenTimeouts = 0;
 
   @override
   void initState() {
@@ -52,6 +55,7 @@ class _GameRoomViewState extends State<_GameRoomView> {
     _room = context.read<GameRoomState>();
     _seenRounds = _room.roundsCompleted;
     _seenErrors = _room.errorsSeen;
+    _seenTimeouts = _room.timeoutsSeen;
     _room.addListener(_onRoomChanged);
   }
 
@@ -67,6 +71,11 @@ class _GameRoomViewState extends State<_GameRoomView> {
     if (_room.errorsSeen != _seenErrors) {
       _seenErrors = _room.errorsSeen;
       _snack(_room.lastError, AppColors.amber);
+    }
+    if (_room.timeoutsSeen != _seenTimeouts) {
+      _seenTimeouts = _room.timeoutsSeen;
+      final name = _room.playerById(_room.lastTimedOutPlayerId)?.name ?? '';
+      _snack('⏰ خلص وقت $name — الجولة راحت عليه!', AppColors.ruby);
     }
     if (_room.roundsCompleted != _seenRounds) {
       _seenRounds = _room.roundsCompleted;
@@ -361,7 +370,7 @@ class _LobbyView extends StatelessWidget {
 class _LobbySettings extends StatelessWidget {
   const _LobbySettings();
 
-  static const _roundOptions = [3, 5, 10];
+  static const _roundOptions = [1, 3, 5, 10];
   static const _difficulties = [
     ('easy', 'سهل'),
     ('progressive', 'متدرج'),
@@ -549,14 +558,25 @@ class _TurnViewState extends State<_TurnView> {
           children: [
             const _PlayersStrip(),
             const SizedBox(height: 10),
-            Center(
-              child: Text(
-                'جولة ${room.roundNumber} / ${room.totalRounds}',
-                style: AppText.number(
-                    size: 13,
-                    weight: FontWeight.w700,
-                    color: AppColors.textSecondary),
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (room.turnDeadline != null)
+                  _TurnCountdown(
+                    key: ValueKey(room.roundNumber),
+                    deadline: room.turnDeadline!,
+                    totalSeconds: room.turnTotalSeconds,
+                    emphasize: room.isMyTurn,
+                  ),
+                const SizedBox(width: 12),
+                Text(
+                  'جولة ${room.roundNumber} / ${room.totalRounds}',
+                  style: AppText.number(
+                      size: 13,
+                      weight: FontWeight.w700,
+                      color: AppColors.textSecondary),
+                ),
+              ],
             ),
             const SizedBox(height: 10),
             if (country != null)
@@ -610,6 +630,168 @@ class _TurnViewState extends State<_TurnView> {
       ),
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Turn countdown — a neon ring animating toward the SERVER's deadline.
+// The server is authoritative; this is pure presentation, so drift of a few
+// hundred ms is invisible and harmless.
+// ---------------------------------------------------------------------------
+
+class _TurnCountdown extends StatefulWidget {
+  final DateTime deadline;
+  final int totalSeconds;
+
+  /// True for the current speaker: the ring pulses/flashes in the last 5s.
+  final bool emphasize;
+
+  const _TurnCountdown({
+    super.key,
+    required this.deadline,
+    required this.totalSeconds,
+    required this.emphasize,
+  });
+
+  @override
+  State<_TurnCountdown> createState() => _TurnCountdownState();
+}
+
+class _TurnCountdownState extends State<_TurnCountdown>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _clock;
+
+  @override
+  void initState() {
+    super.initState();
+    _clock = AnimationController(
+      vsync: this,
+      duration: Duration(seconds: widget.totalSeconds),
+    );
+    _seek();
+  }
+
+  void _seek() {
+    // Start mid-way if we joined late (snapshot with time already burned).
+    final remainingMs = widget.deadline
+        .difference(DateTime.now())
+        .inMilliseconds
+        .clamp(0, widget.totalSeconds * 1000);
+    _clock
+      ..value = 1 - remainingMs / (widget.totalSeconds * 1000)
+      ..forward();
+  }
+
+  @override
+  void didUpdateWidget(_TurnCountdown old) {
+    super.didUpdateWidget(old);
+    if (old.deadline != widget.deadline) _seek();
+  }
+
+  @override
+  void dispose() {
+    _clock.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _clock,
+      builder: (context, _) {
+        final remaining = (1 - _clock.value) * widget.totalSeconds;
+        final secondsLeft = remaining.ceil().clamp(0, widget.totalSeconds);
+        final danger = remaining <= 5;
+        final accent = danger
+            ? AppColors.ruby
+            : (remaining <= 10 ? AppColors.amber : AppColors.electricBlue);
+        // 2Hz flash for the speaker in the final 5 seconds.
+        final flash = danger && widget.emphasize
+            ? (math.sin(remaining * math.pi * 4) + 1) / 2
+            : 0.0;
+        return Transform.scale(
+          scale: 1 + .08 * flash,
+          child: SizedBox(
+            width: 52,
+            height: 52,
+            child: CustomPaint(
+              painter: _CountdownPainter(
+                progress: 1 - _clock.value,
+                color: accent,
+                glow: .45 + .55 * flash,
+              ),
+              child: Center(
+                child: Text(
+                  '$secondsLeft',
+                  style: AppText.number(
+                    size: 19,
+                    weight: FontWeight.w800,
+                    color: danger ? AppColors.ruby : Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _CountdownPainter extends CustomPainter {
+  final double progress; // 1.0 full → 0.0 empty
+  final Color color;
+  final double glow;
+
+  const _CountdownPainter({
+    required this.progress,
+    required this.color,
+    required this.glow,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    const stroke = 4.5;
+    final radius = (size.shortestSide - stroke) / 2 - 1;
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..color = AppColors.stroke,
+    );
+    if (progress <= 0) return;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    final sweep = progress * 2 * math.pi;
+    canvas.drawArc(
+      rect,
+      -math.pi / 2,
+      sweep,
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..strokeCap = StrokeCap.round
+        ..color = color.withValues(alpha: .6 * glow)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+    );
+    canvas.drawArc(
+      rect,
+      -math.pi / 2,
+      sweep,
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..strokeCap = StrokeCap.round
+        ..color = Color.lerp(color, Colors.white, .25)!,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_CountdownPainter old) =>
+      old.progress != progress || old.color != color || old.glow != glow;
 }
 
 // ---------------------------------------------------------------------------

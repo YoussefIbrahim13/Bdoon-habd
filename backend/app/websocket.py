@@ -59,8 +59,16 @@ def init_room_manager(
     _manager = RoomManager(
         country_provider=country_provider,
         fact_evaluator=fact_evaluator or llm_fact_evaluator,
+        broadcaster=_timer_broadcaster,
     )
     return _manager
+
+
+async def _timer_broadcaster(room: Room, events: list[dict[str, Any]]) -> None:
+    """Sink for server-initiated (turn-timer) events. A timeout can END the
+    match with no client request in flight, so persistence rides here too."""
+    await _broadcast(room, events)
+    await _maybe_persist(room)
 
 
 def get_room_manager() -> RoomManager:

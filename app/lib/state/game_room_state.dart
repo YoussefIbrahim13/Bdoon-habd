@@ -67,9 +67,17 @@ class GameRoomState extends ChangeNotifier {
   OnlinePlayer? winner;
   String? gameOverReason;
 
+  /// Server-authoritative turn clock: the moment the current speaker's time
+  /// runs out (null outside AWAITING_FACT). The UI animates toward it
+  /// locally; the SERVER decides the actual timeout.
+  DateTime? turnDeadline;
+  int turnTotalSeconds = 30;
+
   /// One-shot UI feedback: bump counters + payloads the screen listens to.
   RoundResult? lastRoundResult;
   int roundsCompleted = 0;
+  String? lastTimedOutPlayerId;
+  int timeoutsSeen = 0;
   String lastError = '';
   int errorsSeen = 0;
 
@@ -177,7 +185,8 @@ class GameRoomState extends ChangeNotifier {
       case SettingsUpdated(:final totalRounds, :final difficulty):
         this.totalRounds = totalRounds;
         this.difficulty = difficulty;
-      case NextTurn(:final round, :final playerId, :final country):
+      case NextTurn(:final round, :final playerId, :final country,
+            :final turnSeconds):
         roundNumber = round;
         currentPlayerId = playerId;
         this.country = country;
@@ -186,10 +195,17 @@ class GameRoomState extends ChangeNotifier {
         votesCast = 0;
         votesNeeded = 0;
         myVoteCast = false;
+        turnTotalSeconds = turnSeconds;
+        turnDeadline = DateTime.now().add(Duration(seconds: turnSeconds));
         phase = OnlinePhase.awaitingFact;
       case FactSubmitted(:final fact):
         submittedFact = fact;
+        turnDeadline = null; // the fact beat the clock
         phase = OnlinePhase.evaluating;
+      case TurnTimedOut(:final playerId):
+        lastTimedOutPlayerId = playerId;
+        timeoutsSeen++;
+        turnDeadline = null;
       case AiVerdictEvent(:final verdict, :final votesNeeded):
         this.verdict = verdict;
         this.votesNeeded = votesNeeded;
@@ -238,6 +254,10 @@ class GameRoomState extends ChangeNotifier {
     totalRounds = snap.totalRounds;
     difficulty = snap.difficulty;
     roundNumber = snap.roundNumber;
+    turnTotalSeconds = snap.turnSeconds;
+    turnDeadline = snap.turnSecondsLeft == null
+        ? null
+        : DateTime.now().add(Duration(seconds: snap.turnSecondsLeft!));
     currentPlayerId = snap.currentPlayerId;
     country = snap.country;
     submittedFact = snap.fact;

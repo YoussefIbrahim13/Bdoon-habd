@@ -125,10 +125,14 @@ void main() {
     await emit({'event': 'game_started', 'turn_order': ['me', 'p2'],
         'total_rounds': 2, 'difficulty': 'easy'});
     await emit({'event': 'next_turn', 'round': 1, 'total_rounds': 2,
-        'player_id': 'me', 'country': _country()});
+        'player_id': 'me', 'country': _country(), 'turn_seconds': 30});
     expect(room.phase, OnlinePhase.awaitingFact);
     expect(room.isMyTurn, isTrue);
     expect(room.country!.code, 'EG');
+    // Server clock mirrored locally: deadline ~30s out.
+    expect(room.turnTotalSeconds, 30);
+    final left = room.turnDeadline!.difference(DateTime.now()).inSeconds;
+    expect(left, inInclusiveRange(28, 30));
 
     room.submitFact('عاصمتها القاهرة');
     expect(conn.sent.last,
@@ -136,6 +140,7 @@ void main() {
     await emit({'event': 'fact_submitted', 'player_id': 'me',
         'fact': 'عاصمتها القاهرة'});
     expect(room.phase, OnlinePhase.evaluating);
+    expect(room.turnDeadline, isNull); // clock stops once the fact lands
 
     await emit({'event': 'ai_verdict', 'verdict': 'true',
         'explanation': 'صح', 'votes_needed': 2});
@@ -184,6 +189,43 @@ void main() {
     expect(room.phase, OnlinePhase.gameOver);
     expect(room.winner!.id, 'me');
     expect(room.playerById('me')!.score, 2);
+  });
+
+  test('turn_timed_out fires one-shot feedback and stops the clock',
+      () async {
+    await emitLobbySnapshot();
+    await emit({'event': 'next_turn', 'round': 1, 'total_rounds': 2,
+        'player_id': 'me', 'country': _country(), 'turn_seconds': 30});
+    expect(room.turnDeadline, isNotNull);
+    await emit({'event': 'turn_timed_out', 'player_id': 'me', 'round': 1});
+    expect(room.timeoutsSeen, 1);
+    expect(room.lastTimedOutPlayerId, 'me');
+    expect(room.turnDeadline, isNull);
+  });
+
+  test('mid-turn snapshot restores the remaining clock', () async {
+    await emit({
+      'event': 'room_state',
+      'room_code': '123456',
+      'host_id': 'me',
+      'phase': 'awaiting_fact',
+      'total_rounds': 2,
+      'difficulty': 'easy',
+      'round_number': 1,
+      'turn_seconds': 30,
+      'turn_seconds_left': 12,
+      'current_player_id': 'me',
+      'current_country': _country(),
+      'current_fact': null,
+      'ai_verdict': null,
+      'votes_cast': 0,
+      'players': [
+        {'id': 'me', 'name': 'Me', 'picture': null, 'score': 0,
+         'connected': true},
+      ],
+    });
+    final left = room.turnDeadline!.difference(DateTime.now()).inSeconds;
+    expect(left, inInclusiveRange(10, 12)); // rejoin resumes mid-countdown
   });
 
   test('server rule errors bump the counter and unlock voting', () async {

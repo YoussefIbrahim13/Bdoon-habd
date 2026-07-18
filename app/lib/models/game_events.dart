@@ -63,6 +63,8 @@ sealed class GameEvent {
           totalRounds: (json['total_rounds'] as num?)?.toInt() ?? 5,
           difficulty: json['difficulty'] as String? ?? 'progressive',
           roundNumber: (json['round_number'] as num?)?.toInt() ?? 0,
+          turnSeconds: (json['turn_seconds'] as num?)?.toInt() ?? 30,
+          turnSecondsLeft: (json['turn_seconds_left'] as num?)?.toInt(),
           currentPlayerId: json['current_player_id'] as String?,
           country: json['current_country'] == null
               ? null
@@ -109,6 +111,12 @@ sealed class GameEvent {
           playerId: json['player_id'] as String,
           country: Country.fromJson(
               (json['country'] as Map).cast<String, dynamic>()),
+          turnSeconds: (json['turn_seconds'] as num?)?.toInt() ?? 30,
+        );
+      case 'turn_timed_out':
+        return TurnTimedOut(
+          playerId: json['player_id'] as String,
+          round: (json['round'] as num).toInt(),
         );
       case 'fact_submitted':
         return FactSubmitted(
@@ -168,6 +176,8 @@ class RoomSnapshot extends GameEvent {
   final int totalRounds;
   final String difficulty;
   final int roundNumber;
+  final int turnSeconds;
+  final int? turnSecondsLeft;
   final String? currentPlayerId;
   final Country? country;
   final String? fact;
@@ -181,6 +191,8 @@ class RoomSnapshot extends GameEvent {
     required this.totalRounds,
     required this.difficulty,
     required this.roundNumber,
+    required this.turnSeconds,
+    required this.turnSecondsLeft,
     required this.currentPlayerId,
     required this.country,
     required this.fact,
@@ -229,12 +241,21 @@ class NextTurn extends GameEvent {
   final int totalRounds;
   final String playerId;
   final Country country;
+  final int turnSeconds;
   const NextTurn({
     required this.round,
     required this.totalRounds,
     required this.playerId,
     required this.country,
+    required this.turnSeconds,
   });
+}
+
+/// The speaker's 30 seconds ran out — the server forfeited the round.
+class TurnTimedOut extends GameEvent {
+  final String playerId;
+  final int round;
+  const TurnTimedOut({required this.playerId, required this.round});
 }
 
 class FactSubmitted extends GameEvent {

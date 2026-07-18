@@ -65,6 +65,12 @@ VALID_DIFFICULTIES = ("easy", "hard", "progressive")
 DEFAULT_DIFFICULTY = "progressive"
 MAX_FACT_LENGTH = 300
 
+# Strict per-turn limit for AWAITING_FACT (seconds). The SERVER owns this
+# clock: when it expires the speaker forfeits the round (0 points), a
+# `turn_timed_out` broadcast goes out, and play advances. Env-overridable so
+# tests can shrink it.
+TURN_SECONDS = max(3, int(os.environ.get("TURN_SECONDS", "30")))
+
 # Empty rooms older than this are pruned lazily on the next create_room.
 STALE_ROOM_SECONDS = 15 * 60
 
@@ -72,6 +78,9 @@ Event = dict[str, Any]
 # (difficulty, round_number, total_rounds) -> country dict
 CountryProvider = Callable[[str, int, int], dict[str, Any]]
 FactEvaluator = Callable[[dict[str, Any], str], Awaitable[dict[str, Any]]]
+# Async sink the manager uses to push timer-driven events (the transport
+# layer's broadcast function). None = timer events are dropped (bare tests).
+Broadcaster = Callable[["Room", list[Event]], Awaitable[None]]
 
 
 class RoomError(Exception):
@@ -130,6 +139,13 @@ class Room:
     # Set by the transport layer once final stats hit the database, so a
     # game-over followed by disconnects can't double-write.
     persisted: bool = False
+    # --- Turn timer plumbing (managed exclusively under `lock`) ---
+    # Monotonic deadline for the current AWAITING_FACT turn (None otherwise).
+    turn_deadline: float | None = None
+    # Generation token: bumped on every arm/cancel, so a timer task that
+    # already woke up can detect it belongs to a dead round and do nothing.
+    turn_token: int = 0
+    turn_timer_task: Any = field(default=None, repr=False)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     @property
@@ -149,6 +165,9 @@ class Room:
 
     def snapshot(self) -> Event:
         """Full state for a (re)joining client."""
+        seconds_left = None
+        if self.phase is RoomPhase.AWAITING_FACT and self.turn_deadline:
+            seconds_left = max(0, int(self.turn_deadline - time.monotonic()))
         return _event(
             "room_state",
             room_code=self.code,
@@ -157,6 +176,8 @@ class Room:
             total_rounds=self.total_rounds,
             difficulty=self.difficulty,
             round_number=self.round_number,
+            turn_seconds=TURN_SECONDS,
+            turn_seconds_left=seconds_left,
             current_player_id=self.current_player_id,
             current_country=self.current_country,
             current_fact=self.current_fact,
@@ -173,9 +194,11 @@ class RoomManager:
         self,
         country_provider: CountryProvider,
         fact_evaluator: FactEvaluator,
+        broadcaster: Broadcaster | None = None,
     ) -> None:
         self._country_provider = country_provider
         self._fact_evaluator = fact_evaluator
+        self._broadcaster = broadcaster
         self._rooms: dict[str, Room] = {}
         self._registry_lock = asyncio.Lock()
 
@@ -218,6 +241,7 @@ class RoomManager:
         async with self._registry_lock:
             if not room.connected_players():
                 self._rooms.pop(room.code, None)
+                self._cancel_turn_timer_locked(room)  # no task may outlive it
                 logger.info("Room %s removed (empty)", room.code)
                 return True
             return False
@@ -313,6 +337,58 @@ class RoomManager:
             events.extend(self._begin_round_locked(room, advance_turn=False))
             return events
 
+    # -- Turn timer --------------------------------------------------------
+    # All three helpers require room.lock to be held by the caller. The token
+    # dance makes cancellation airtight: any arm/cancel bumps the token, so a
+    # timer task that already slept through its cancel() wakes up, sees a
+    # foreign token, and exits without touching the room.
+
+    def _cancel_turn_timer_locked(self, room: Room) -> None:
+        room.turn_token += 1
+        room.turn_deadline = None
+        task = room.turn_timer_task
+        room.turn_timer_task = None
+        if task is not None and not task.done():
+            task.cancel()
+
+    def _arm_turn_timer_locked(self, room: Room) -> None:
+        self._cancel_turn_timer_locked(room)
+        room.turn_deadline = time.monotonic() + TURN_SECONDS
+        token = room.turn_token
+        room.turn_timer_task = asyncio.create_task(
+            self._turn_timeout(room, token)
+        )
+
+    async def _turn_timeout(self, room: Room, token: int) -> None:
+        """Fires when the speaker's clock runs out: forfeit the round (0
+        points), announce it, and advance — or end the match if it was the
+        last round. Pushes events through the broadcaster since no client
+        request is in flight to carry them."""
+        try:
+            await asyncio.sleep(TURN_SECONDS)
+        except asyncio.CancelledError:
+            return
+        async with room.lock:
+            if room.turn_token != token or room.phase is not RoomPhase.AWAITING_FACT:
+                return  # the round moved on while we slept
+            speaker_id = room.current_player_id
+            events = [
+                _event(
+                    "turn_timed_out",
+                    player_id=speaker_id,
+                    round=room.round_number,
+                )
+            ]
+            if room.round_number >= room.total_rounds:
+                events.append(self._finish_match_locked(room))
+            else:
+                events.extend(self._begin_round_locked(room, advance_turn=True))
+        if self._broadcaster is not None:
+            try:
+                await self._broadcaster(room, events)
+            except Exception:  # a broken socket must not kill the timer chain
+                logger.exception("Timer broadcast failed in room %s", room.code)
+
     # -- Round loop --------------------------------------------------------
 
     def _begin_round_locked(self, room: Room, *, advance_turn: bool) -> list[Event]:
@@ -336,6 +412,7 @@ class RoomManager:
         room.ai_verdict = None
         room.votes = {}
         room.phase = RoomPhase.AWAITING_FACT
+        self._arm_turn_timer_locked(room)
         return [
             _event(
                 "next_turn",
@@ -343,6 +420,7 @@ class RoomManager:
                 total_rounds=room.total_rounds,
                 player_id=room.current_player_id,
                 country=room.current_country,
+                turn_seconds=TURN_SECONDS,
             )
         ]
 
@@ -360,6 +438,7 @@ class RoomManager:
                 raise RoomError("اكتب المعلومة الأول.")
             room.current_fact = fact[:MAX_FACT_LENGTH]
             room.phase = RoomPhase.EVALUATING
+            self._cancel_turn_timer_locked(room)  # the fact beat the clock
             return [
                 _event("fact_submitted", player_id=actor_id, fact=room.current_fact)
             ]
@@ -463,6 +542,7 @@ class RoomManager:
 
     def _finish_match_locked(self, room: Room) -> Event:
         """All rounds played: highest score wins; a tie has no sole winner."""
+        self._cancel_turn_timer_locked(room)
         room.phase = RoomPhase.FINISHED
         top = max((p.score for p in room.players.values()), default=0)
         leaders = [p for p in room.players.values() if p.score == top]
@@ -506,6 +586,7 @@ class RoomManager:
             # Mid-match integrity:
             remaining = room.connected_players()
             if len(remaining) < MIN_PLAYERS_TO_START:
+                self._cancel_turn_timer_locked(room)
                 room.phase = RoomPhase.FINISHED
                 winner = max(remaining, default=None, key=lambda p: p.score)
                 events.append(
