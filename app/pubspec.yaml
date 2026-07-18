@@ -40,6 +40,7 @@ dependencies:
   # Pinned to 6.x: the classic GoogleSignIn().signIn() flow (7.x is a
   # breaking singleton/authenticate() redesign).
   google_sign_in: ^6.3.0
+  web_socket_channel: ^3.0.1
 
 dev_dependencies:
   flutter_test:

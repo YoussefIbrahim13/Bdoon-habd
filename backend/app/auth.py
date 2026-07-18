@@ -176,16 +176,16 @@ def _issue_app_jwt(player: Player) -> tuple[str, int]:
     return token, expires_at
 
 
-def get_current_player(
-    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
-    db: Annotated[Session, Depends(get_db)],
-) -> Player:
-    """Dependency for protected endpoints: Authorization: Bearer <our JWT>."""
-    if creds is None:
-        raise HTTPException(status_code=401, detail="Missing bearer token.")
+def resolve_player_by_token(token: str, db: Session) -> Player:
+    """Validate one of OUR JWTs and return the live player.
+
+    Shared by the HTTP bearer dependency and the WebSocket handshake (which
+    carries the token as a query param — browsers/Flutter WS clients cannot
+    set headers). Raises HTTPException with the right status on any failure.
+    """
     try:
         claims = pyjwt.decode(
-            creds.credentials,
+            token,
             _JWT_SECRET,
             algorithms=[JWT_ALGORITHM],
             issuer=JWT_ISSUER,
@@ -203,6 +203,16 @@ def get_current_player(
         # Soft-deleted mid-session: their still-valid JWT dies right here.
         raise HTTPException(status_code=403, detail="Account disabled.")
     return player
+
+
+def get_current_player(
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Player:
+    """Dependency for protected endpoints: Authorization: Bearer <our JWT>."""
+    if creds is None:
+        raise HTTPException(status_code=401, detail="Missing bearer token.")
+    return resolve_player_by_token(creds.credentials, db)
 
 
 # --------------------------------------------------------------------------

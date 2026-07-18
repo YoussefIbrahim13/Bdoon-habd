@@ -7,6 +7,7 @@ import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
 import 'home_screen.dart';
+import 'online_hub_screen.dart';
 import 'sign_in_screen.dart';
 
 /// Entry gateway: pick the game mode before the lobby.
@@ -47,34 +48,14 @@ class _GameModeScreenState extends State<GameModeScreen>
 
   void _onOnlineTap() {
     if (context.read<AuthService>().isSignedIn) {
-      _teaseOnline(); // signed in — mode itself still shipping
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const OnlineHubScreen()),
+      );
     } else {
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const SignInScreen()),
       );
     }
-  }
-
-  void _teaseOnline() {
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: const Color(0xF5161320),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: BorderSide(
-              color: AppColors.neonPurple.withValues(alpha: .55),
-            ),
-          ),
-          duration: const Duration(seconds: 3),
-          content: Text(
-            'طور الأونلاين قادم في التحديث القادم.. جهّز نفسك للتحدي! 🔥',
-            style: AppText.ui(size: 14, weight: FontWeight.w700),
-          ),
-        ),
-      );
   }
 
   @override

@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:el_hakem/screens/game_mode_screen.dart';
 import 'package:el_hakem/screens/home_screen.dart';
+import 'package:el_hakem/screens/online_hub_screen.dart';
 import 'package:el_hakem/screens/sign_in_screen.dart';
 import 'package:el_hakem/services/api_service.dart';
 import 'package:el_hakem/services/auth_service.dart';
@@ -83,8 +84,7 @@ void main() {
     expect(find.text('تسجيل الدخول باستخدام جوجل'), findsOneWidget);
   });
 
-  testWidgets('signed in: online card shows the player identity',
-      (tester) async {
+  testWidgets('signed in: online card opens the online hub', (tester) async {
     _seedSignedInPrefs();
     final (game, auth) = await _pump(tester);
     addTearDown(game.dispose);
@@ -96,11 +96,11 @@ void main() {
 
     await tester.tap(find.text('لعب أونلاين'));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    // Interim behavior until the online lobby screen ships: no navigation
-    // away, and no sign-in prompt for an already-signed-in player.
+    await tester.pump(const Duration(milliseconds: 600)); // route transition
     expect(find.byType(SignInScreen), findsNothing);
-    expect(find.byType(GameModeScreen), findsOneWidget);
+    expect(find.byType(OnlineHubScreen), findsOneWidget);
+    expect(find.text('اعمل أوضة'), findsOneWidget);
+    expect(find.text('ادخل الأوضة'), findsOneWidget);
   });
 
   testWidgets('offline card navigates to the lobby', (tester) async {

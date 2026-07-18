@@ -40,7 +40,9 @@ returns a friendly 503.
 | `POST /api/auth/google` | `{"idToken": "<Google ID token>"}` → app JWT + player profile (provisions new players; needs `GOOGLE_CLIENT_ID` + `JWT_SECRET` env) |
 | `GET /api/auth/me` | `Authorization: Bearer <app JWT>` → the signed-in player's profile |
 | `GET /api/admin/players` | `X-Admin-Token` header → all players (profile + stats); disabled unless `ADMIN_TOKEN` env is set |
-| `DELETE /api/admin/players/{id}` | `X-Admin-Token` header → delete a player by UUID (404 if unknown) |
+| `DELETE /api/admin/players/{id}` | `X-Admin-Token` header → soft-delete a player by UUID (404 if unknown) |
+| `POST /api/rooms` | Bearer JWT → create a multiplayer room `{room_code, target_score}` |
+| `WS /ws/game/{room_code}?token=<JWT>` | Real-time room socket: lobby, turns, AI verdicts, voting (see `app/websocket.py` for the event protocol) |
 
 ### How verification works (hybrid, per the spec)
 
