@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 from .auth import get_current_player, resolve_player_by_token
 from .countries import difficulty_of
 from .db import Player, get_db, _SessionLocal  # noqa: PLC2701 - session factory
+from .llm_judge import llm_fact_evaluator
 from .rooms import Room, RoomError, RoomManager, RoomPhase
 
 logger = logging.getLogger(__name__)
@@ -49,11 +50,15 @@ _manager: RoomManager | None = None
 def init_room_manager(
     country_provider: Any, fact_evaluator: Any | None = None
 ) -> RoomManager:
-    """Called once from the app lifespan, after countries are loaded."""
+    """Called once from the app lifespan, after countries are loaded.
+
+    The default evaluator is the real LLM Smart Judge (llm_judge.py);
+    tests inject deterministic fakes here.
+    """
     global _manager
     _manager = RoomManager(
         country_provider=country_provider,
-        fact_evaluator=fact_evaluator or stub_fact_evaluator,
+        fact_evaluator=fact_evaluator or llm_fact_evaluator,
     )
     return _manager
 
@@ -64,7 +69,7 @@ def get_room_manager() -> RoomManager:
 
 
 # --------------------------------------------------------------------------
-# AI evaluation stub — the seam for the Smart Judge / LLM gateway.
+# Country drawing for the room engine (AI judging lives in llm_judge.py).
 # --------------------------------------------------------------------------
 
 
@@ -94,22 +99,6 @@ def make_country_provider(countries: list[dict[str, Any]]):
         return random.choice(pool)
 
     return provider
-
-
-async def stub_fact_evaluator(
-    country: dict[str, Any], fact: str
-) -> dict[str, Any]:
-    """Placeholder verdict until this is wired to the LLM gateway.
-
-    Contract (keep when swapping in the real judge):
-    returns {"verdict": "true" | "false" | "unreliable", "explanation": str}.
-    The real implementation will call app.state.judge.verify(...) with the
-    same country dict + fact and map its verdict onto this shape.
-    """
-    return {
-        "verdict": "unreliable",
-        "explanation": "الحكم الذكي للأونلاين لسه في الفرن — القرار للتصويت!",
-    }
 
 
 # --------------------------------------------------------------------------
