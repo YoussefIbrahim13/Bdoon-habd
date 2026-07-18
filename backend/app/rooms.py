@@ -11,16 +11,25 @@ Concurrency model: FastAPI WebSocket handlers all run on one event loop, so
 `async with room.lock`, and the manager's own lock guards the room registry.
 Nothing in this module blocks the loop.
 
+Match structure: a fixed number of rounds (host-configurable `total_rounds`),
+one fact per round, highest score at the end wins (tie → no sole winner).
+Countries are drawn per-round by the host-chosen `difficulty`:
+- 'easy'        → famous flags only
+- 'hard'        → obscure flags only
+- 'progressive' → early rounds famous, sliding to obscure as rounds advance
+
 Game loop (one round):
-1. Server draws a country and announces `next_turn` (whose turn + country).
+1. Server draws a country for (difficulty, round, total) and announces
+   `next_turn` (whose turn + country).
 2. The current player submits a fact → `fact_submitted` broadcast.
-3. The AI evaluator (stub for now; later the Smart Judge / LLM gateway)
-   returns a verdict → `ai_verdict` broadcast.
-4. Every connected player votes accept/habd → `voting_update` after each
-   vote; when all votes are in, the round resolves.
-5. Tally = player votes + the AI as one extra vote ("unreliable" abstains).
-   Majority-true awards the speaker a point. `round_ended` broadcast, then
-   either `game_over` (target reached) or the next round begins.
+3. The AI evaluator returns a verdict → `ai_verdict` broadcast.
+4. Every connected player EXCEPT the speaker votes accept/habd (no judging
+   your own fact) → `voting_update` after each vote; when all eligible votes
+   are in, the round resolves. With zero eligible voters (solo testing) the
+   AI verdict alone resolves it immediately.
+5. Tally = eligible votes + the AI as one extra vote ("unreliable" abstains).
+   Majority-true awards the speaker a point → `round_ended`, then either
+   `game_over` (last round done) or the next round begins.
 """
 
 from __future__ import annotations
@@ -50,14 +59,18 @@ MAX_PLAYERS = 8
 # there is nothing to remember to switch back.
 MIN_PLAYERS_TO_START = max(1, int(os.environ.get("MIN_PLAYERS_TO_START", "2")))
 
-DEFAULT_TARGET_SCORE = 5
+DEFAULT_TOTAL_ROUNDS = 5
+MAX_TOTAL_ROUNDS = 20
+VALID_DIFFICULTIES = ("easy", "hard", "progressive")
+DEFAULT_DIFFICULTY = "progressive"
 MAX_FACT_LENGTH = 300
 
 # Empty rooms older than this are pruned lazily on the next create_room.
 STALE_ROOM_SECONDS = 15 * 60
 
 Event = dict[str, Any]
-CountryProvider = Callable[[], dict[str, Any]]
+# (difficulty, round_number, total_rounds) -> country dict
+CountryProvider = Callable[[str, int, int], dict[str, Any]]
 FactEvaluator = Callable[[dict[str, Any], str], Awaitable[dict[str, Any]]]
 
 
@@ -101,7 +114,8 @@ class RoomPlayer:
 class Room:
     code: str
     host_id: str
-    target_score: int = DEFAULT_TARGET_SCORE
+    total_rounds: int = DEFAULT_TOTAL_ROUNDS
+    difficulty: str = DEFAULT_DIFFICULTY
     phase: RoomPhase = RoomPhase.LOBBY
     # dict preserves insertion order == seating/turn order.
     players: dict[str, RoomPlayer] = field(default_factory=dict)
@@ -127,6 +141,12 @@ class Room:
     def connected_players(self) -> list[RoomPlayer]:
         return [p for p in self.players.values() if p.connected]
 
+    def eligible_voters(self) -> list[RoomPlayer]:
+        """Connected players minus the current speaker — no self-voting."""
+        return [
+            p for p in self.connected_players() if p.id != self.current_player_id
+        ]
+
     def snapshot(self) -> Event:
         """Full state for a (re)joining client."""
         return _event(
@@ -134,7 +154,8 @@ class Room:
             room_code=self.code,
             host_id=self.host_id,
             phase=self.phase.value,
-            target_score=self.target_score,
+            total_rounds=self.total_rounds,
+            difficulty=self.difficulty,
             round_number=self.round_number,
             current_player_id=self.current_player_id,
             current_country=self.current_country,
@@ -161,7 +182,10 @@ class RoomManager:
     # -- Registry ----------------------------------------------------------
 
     async def create_room(
-        self, host_id: str, target_score: int = DEFAULT_TARGET_SCORE
+        self,
+        host_id: str,
+        total_rounds: int = DEFAULT_TOTAL_ROUNDS,
+        difficulty: str = DEFAULT_DIFFICULTY,
     ) -> Room:
         async with self._registry_lock:
             self._prune_stale_locked()
@@ -176,7 +200,11 @@ class RoomManager:
             room = Room(
                 code=code,
                 host_id=host_id,
-                target_score=max(1, min(target_score, 20)),
+                total_rounds=max(1, min(total_rounds, MAX_TOTAL_ROUNDS)),
+                difficulty=(
+                    difficulty if difficulty in VALID_DIFFICULTIES
+                    else DEFAULT_DIFFICULTY
+                ),
             )
             self._rooms[code] = room
             logger.info("Room %s created by %s", code, host_id)
@@ -234,6 +262,35 @@ class RoomManager:
             return [_event("player_joined", player=player.public_info(),
                            reconnected=False)]
 
+    async def update_settings(
+        self,
+        room: Room,
+        actor_id: str,
+        total_rounds: int | None = None,
+        difficulty: str | None = None,
+    ) -> list[Event]:
+        """Host-only lobby knobs; broadcast so guests' UIs sync live."""
+        async with room.lock:
+            if actor_id != room.host_id:
+                raise RoomError("صاحب الأوضة بس اللي يغيّر الإعدادات.")
+            if room.phase is not RoomPhase.LOBBY:
+                raise RoomError("الإعدادات بتتغير قبل ما اللعب يبدأ بس.")
+            if total_rounds is not None:
+                if not 1 <= total_rounds <= MAX_TOTAL_ROUNDS:
+                    raise RoomError("عدد الجولات لازم يكون من 1 لـ 20.")
+                room.total_rounds = total_rounds
+            if difficulty is not None:
+                if difficulty not in VALID_DIFFICULTIES:
+                    raise RoomError("مستوى الصعوبة ده مش معروف.")
+                room.difficulty = difficulty
+            return [
+                _event(
+                    "settings_updated",
+                    total_rounds=room.total_rounds,
+                    difficulty=room.difficulty,
+                )
+            ]
+
     async def start_game(self, room: Room, actor_id: str) -> list[Event]:
         async with room.lock:
             if actor_id != room.host_id:
@@ -249,7 +306,8 @@ class RoomManager:
                 _event(
                     "game_started",
                     turn_order=room.turn_order,
-                    target_score=room.target_score,
+                    total_rounds=room.total_rounds,
+                    difficulty=room.difficulty,
                 )
             ]
             events.extend(self._begin_round_locked(room, advance_turn=False))
@@ -271,7 +329,9 @@ class RoomManager:
                 break
             room.turn_index += 1
         room.round_number += 1
-        room.current_country = self._country_provider()
+        room.current_country = self._country_provider(
+            room.difficulty, room.round_number, room.total_rounds
+        )
         room.current_fact = None
         room.ai_verdict = None
         room.votes = {}
@@ -280,6 +340,7 @@ class RoomManager:
             _event(
                 "next_turn",
                 round=room.round_number,
+                total_rounds=room.total_rounds,
                 player_id=room.current_player_id,
                 country=room.current_country,
             )
@@ -305,7 +366,8 @@ class RoomManager:
 
     async def evaluate_fact(self, room: Room) -> list[Event]:
         """Phase 2: run the AI evaluator (outside the lock — it may be slow)
-        and open voting. Safe against phase races via a re-check."""
+        and open voting. Safe against phase races via a re-check. With zero
+        eligible voters (solo testing) the AI verdict resolves immediately."""
         country, fact = room.current_country, room.current_fact
         if country is None or fact is None:
             return []
@@ -322,22 +384,27 @@ class RoomManager:
                 return []  # round was torn down (e.g. mass disconnect)
             room.ai_verdict = verdict
             room.phase = RoomPhase.AWAITING_VOTES
-            return [
+            events = [
                 _event(
                     "ai_verdict",
                     verdict=verdict.get("verdict", "unreliable"),
                     explanation=verdict.get("explanation", ""),
-                    votes_needed=len(room.connected_players()),
+                    votes_needed=len(room.eligible_voters()),
                 )
             ]
+            if self._voting_complete_locked(room):
+                events.extend(self._resolve_round_locked(room))
+            return events
 
     async def submit_vote(
         self, room: Room, actor_id: str, accept: bool
     ) -> list[Event]:
-        """Phase 3: everyone votes; the last vote resolves the round."""
+        """Phase 3: eligible players vote; the last vote resolves the round."""
         async with room.lock:
             if room.phase is not RoomPhase.AWAITING_VOTES:
                 raise RoomError("مش وقت التصويت دلوقتي.")
+            if actor_id == room.current_player_id:
+                raise RoomError("ممنوع تحكم على معلومتك بنفسك 😉")
             player = room.players.get(actor_id)
             if player is None or not player.connected:
                 raise RoomError("انت مش في الأوضة دي.")
@@ -348,7 +415,7 @@ class RoomManager:
                 _event(
                     "voting_update",
                     votes_cast=len(room.votes),
-                    votes_needed=len(room.connected_players()),
+                    votes_needed=len(room.eligible_voters()),
                 )
             ]
             if self._voting_complete_locked(room):
@@ -356,8 +423,8 @@ class RoomManager:
             return events
 
     def _voting_complete_locked(self, room: Room) -> bool:
-        connected_ids = {p.id for p in room.connected_players()}
-        return connected_ids.issubset(room.votes.keys())
+        eligible_ids = {p.id for p in room.eligible_voters()}
+        return eligible_ids.issubset(room.votes.keys())
 
     def _resolve_round_locked(self, room: Room) -> list[Event]:
         speaker_id = room.current_player_id
@@ -388,25 +455,31 @@ class RoomManager:
             )
         ]
 
-        if speaker.score >= room.target_score:
-            room.phase = RoomPhase.FINISHED
-            events.append(
-                _event(
-                    "game_over",
-                    winner=speaker.public_info(),
-                    scores={p.id: p.score for p in room.players.values()},
-                )
-            )
+        if room.round_number >= room.total_rounds:
+            events.append(self._finish_match_locked(room))
         else:
             events.extend(self._begin_round_locked(room, advance_turn=True))
         return events
+
+    def _finish_match_locked(self, room: Room) -> Event:
+        """All rounds played: highest score wins; a tie has no sole winner."""
+        room.phase = RoomPhase.FINISHED
+        top = max((p.score for p in room.players.values()), default=0)
+        leaders = [p for p in room.players.values() if p.score == top]
+        sole_winner = leaders[0] if len(leaders) == 1 else None
+        return _event(
+            "game_over",
+            reason="rounds_complete" if sole_winner else "tie",
+            winner=sole_winner.public_info() if sole_winner else None,
+            scores={p.id: p.score for p in room.players.values()},
+        )
 
     # -- Disconnects -------------------------------------------------------
 
     async def handle_disconnect(self, room: Room, player_id: str) -> list[Event]:
         """Mark a player gone and keep the game consistent: skip their turn,
         drop their pending vote requirement, transfer host, or end the game
-        if fewer than two players remain mid-match."""
+        if fewer than the minimum players remain mid-match."""
         async with room.lock:
             player = room.players.get(player_id)
             if player is None or not player.connected:
@@ -449,8 +522,14 @@ class RoomManager:
                 RoomPhase.AWAITING_FACT,
                 RoomPhase.EVALUATING,
             ):
-                # The speaker vanished mid-turn — move on with a fresh round.
-                events.extend(self._begin_round_locked(room, advance_turn=True))
+                # The speaker vanished mid-turn — the round is forfeited but
+                # still consumed, so the match can't loop past total_rounds.
+                if room.round_number >= room.total_rounds:
+                    events.append(self._finish_match_locked(room))
+                else:
+                    events.extend(
+                        self._begin_round_locked(room, advance_turn=True)
+                    )
             elif room.phase is RoomPhase.AWAITING_VOTES:
                 room.votes.pop(player_id, None)
                 if self._voting_complete_locked(room):

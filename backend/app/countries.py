@@ -116,6 +116,40 @@ def find_country(countries: list[dict[str, Any]], query: str) -> dict[str, Any] 
     return matches[0] if len(matches) == 1 else None
 
 
+# --- Flag recognizability tiers (mirrors the app's classification) --------
+# Arabic-first audience: the whole Arab world counts as easy. Anything not
+# listed is hard, so obscure/new countries land in the right bucket.
+
+EASY_CODES = {
+    "EG", "SA", "AE", "QA", "KW", "BH", "OM", "YE", "JO", "LB", "SY", "IQ",
+    "PS", "LY", "SD", "TN", "DZ", "MA", "MR", "SO",
+    "US", "GB", "FR", "DE", "IT", "ES", "PT", "NL", "BE", "CH", "SE", "NO",
+    "DK", "GR", "RU", "UA", "TR", "IR", "CN", "JP", "KR", "IN", "PK", "ID",
+    "BR", "AR", "MX", "CA", "AU", "ZA", "NG", "ET",
+}
+
+MEDIUM_CODES = {
+    "IE", "IS", "FI", "PL", "AT", "CZ", "HU", "RO", "BG", "RS", "HR", "SK",
+    "SI", "LT", "LV", "EE", "LU", "MT", "CY", "AL", "MK", "BA", "MD", "BY",
+    "TH", "VN", "PH", "MY", "SG", "NZ", "AF", "BD", "LK", "NP", "MM", "KH",
+    "KZ", "UZ", "AZ", "GE", "AM", "MN", "KP", "IL",
+    "CL", "CO", "PE", "VE", "UY", "EC", "CU", "DO", "PA", "CR", "GT", "BO",
+    "PY", "JM", "HT", "HN", "NI", "SV", "DJ", "KM",
+    "KE", "GH", "SN", "CM", "CI", "TZ", "UG", "ZW", "AO", "MZ", "ML", "NE",
+    "TD", "RW", "ZM", "BW", "GA",
+}
+
+
+def difficulty_of(code: str) -> str:
+    """'easy' | 'medium' | 'hard' recognizability tier for an ISO code."""
+    c = code.upper()
+    if c in EASY_CODES:
+        return "easy"
+    if c in MEDIUM_CODES:
+        return "medium"
+    return "hard"
+
+
 def fact_sheet(country: dict[str, Any]) -> str:
     """Compact, authoritative fact block injected into the objective-claim prompt."""
     area = country.get("area_km2")

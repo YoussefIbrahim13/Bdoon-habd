@@ -60,7 +60,8 @@ sealed class GameEvent {
           roomCode: json['room_code'] as String,
           hostId: json['host_id'] as String,
           phase: json['phase'] as String,
-          targetScore: (json['target_score'] as num?)?.toInt() ?? 5,
+          totalRounds: (json['total_rounds'] as num?)?.toInt() ?? 5,
+          difficulty: json['difficulty'] as String? ?? 'progressive',
           roundNumber: (json['round_number'] as num?)?.toInt() ?? 0,
           currentPlayerId: json['current_player_id'] as String?,
           country: json['current_country'] == null
@@ -93,13 +94,21 @@ sealed class GameEvent {
       case 'game_started':
         return GameStarted(
           turnOrder: [...(json['turn_order'] as List<dynamic>).cast<String>()],
-          targetScore: (json['target_score'] as num?)?.toInt() ?? 5,
+          totalRounds: (json['total_rounds'] as num?)?.toInt() ?? 5,
+          difficulty: json['difficulty'] as String? ?? 'progressive',
+        );
+      case 'settings_updated':
+        return SettingsUpdated(
+          totalRounds: (json['total_rounds'] as num).toInt(),
+          difficulty: json['difficulty'] as String? ?? 'progressive',
         );
       case 'next_turn':
         return NextTurn(
           round: (json['round'] as num).toInt(),
+          totalRounds: (json['total_rounds'] as num?)?.toInt() ?? 0,
           playerId: json['player_id'] as String,
-          country: Country.fromJson(json['country'] as Map<String, dynamic>),
+          country: Country.fromJson(
+              (json['country'] as Map).cast<String, dynamic>()),
         );
       case 'fact_submitted':
         return FactSubmitted(
@@ -156,7 +165,8 @@ class RoomSnapshot extends GameEvent {
   final String roomCode;
   final String hostId;
   final String phase;
-  final int targetScore;
+  final int totalRounds;
+  final String difficulty;
   final int roundNumber;
   final String? currentPlayerId;
   final Country? country;
@@ -168,7 +178,8 @@ class RoomSnapshot extends GameEvent {
     required this.roomCode,
     required this.hostId,
     required this.phase,
-    required this.targetScore,
+    required this.totalRounds,
+    required this.difficulty,
     required this.roundNumber,
     required this.currentPlayerId,
     required this.country,
@@ -196,16 +207,34 @@ class HostChanged extends GameEvent {
 
 class GameStarted extends GameEvent {
   final List<String> turnOrder;
-  final int targetScore;
-  const GameStarted({required this.turnOrder, required this.targetScore});
+  final int totalRounds;
+  final String difficulty;
+  const GameStarted({
+    required this.turnOrder,
+    required this.totalRounds,
+    required this.difficulty,
+  });
+}
+
+/// Host changed the lobby knobs — every client's UI syncs from this.
+class SettingsUpdated extends GameEvent {
+  final int totalRounds;
+  final String difficulty;
+  const SettingsUpdated(
+      {required this.totalRounds, required this.difficulty});
 }
 
 class NextTurn extends GameEvent {
   final int round;
+  final int totalRounds;
   final String playerId;
   final Country country;
-  const NextTurn(
-      {required this.round, required this.playerId, required this.country});
+  const NextTurn({
+    required this.round,
+    required this.totalRounds,
+    required this.playerId,
+    required this.country,
+  });
 }
 
 class FactSubmitted extends GameEvent {

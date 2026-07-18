@@ -291,7 +291,9 @@ class _LobbyView extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
+              const _LobbySettings(),
+              const SizedBox(height: 16),
               GlassContainer(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -324,16 +326,18 @@ class _LobbyView extends StatelessWidget {
               ),
               const SizedBox(height: 22),
               if (room.iAmHost)
+                // Always tappable: the SERVER owns the minimum-players rule
+                // (env-configurable, e.g. solo testing) — if there aren't
+                // enough players it answers with an Arabic error event that
+                // surfaces as a snackbar. The client never duplicates the
+                // threshold.
                 GameButton(
-                  label: room.players.length < 2
-                      ? 'مستنيين لاعب كمان...'
-                      : 'ابدأ اللعب',
+                  label: 'ابدأ اللعب',
                   icon: Icons.sports_esports_rounded,
                   height: 58,
                   gradient: AppGradients.turn,
                   glowColor: AppColors.neonPurple,
-                  onPressed:
-                      room.players.length < 2 ? null : room.startGame,
+                  onPressed: room.startGame,
                 )
               else
                 Text(
@@ -345,6 +349,161 @@ class _LobbyView extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Lobby settings — host edits, guests watch them sync live.
+// ---------------------------------------------------------------------------
+
+class _LobbySettings extends StatelessWidget {
+  const _LobbySettings();
+
+  static const _roundOptions = [3, 5, 10];
+  static const _difficulties = [
+    ('easy', 'سهل'),
+    ('progressive', 'متدرج'),
+    ('hard', 'صعب'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final room = context.watch<GameRoomState>();
+    final editable = room.iAmHost;
+
+    return GlassContainer(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('إعدادات الماتش',
+                  style: AppText.ui(size: 14, weight: FontWeight.w800)),
+              const Spacer(),
+              if (!editable)
+                Text('صاحب الأوضة بيظبطها',
+                    style: AppText.ui(
+                        size: 11, color: AppColors.textSecondary)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _SettingRow(
+            label: 'عدد الدول',
+            children: [
+              for (final n in _roundOptions)
+                _NeonChip(
+                  label: '$n',
+                  outfit: true,
+                  selected: room.totalRounds == n,
+                  accent: AppColors.electricBlue,
+                  onTap: editable
+                      ? () => context
+                          .read<GameRoomState>()
+                          .updateSettings(totalRounds: n)
+                      : null,
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _SettingRow(
+            label: 'الصعوبة',
+            children: [
+              for (final (value, label) in _difficulties)
+                _NeonChip(
+                  label: label,
+                  selected: room.difficulty == value,
+                  accent: switch (value) {
+                    'easy' => AppColors.emerald,
+                    'hard' => AppColors.ruby,
+                    _ => AppColors.amber,
+                  },
+                  onTap: editable
+                      ? () => context
+                          .read<GameRoomState>()
+                          .updateSettings(difficulty: value)
+                      : null,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingRow extends StatelessWidget {
+  final String label;
+  final List<Widget> children;
+
+  const _SettingRow({required this.label, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 74,
+          child: Text(label,
+              style: AppText.ui(size: 12.5, color: AppColors.textSecondary)),
+        ),
+        Expanded(
+          child: Wrap(spacing: 8, runSpacing: 8, children: children),
+        ),
+      ],
+    );
+  }
+}
+
+/// Neon selectable pill: filled + glowing when selected, hairline glass
+/// otherwise. Null [onTap] = read-only (guest view) but still shows the
+/// host's live selection.
+class _NeonChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final Color accent;
+  final bool outfit;
+  final VoidCallback? onTap;
+
+  const _NeonChip({
+    required this.label,
+    required this.selected,
+    required this.accent,
+    this.outfit = false,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final style = outfit
+        ? AppText.number(
+            size: 15,
+            weight: FontWeight.w800,
+            color: selected ? Colors.white : AppColors.textSecondary)
+        : AppText.ui(
+            size: 12.5,
+            weight: FontWeight.w800,
+            color: selected ? Colors.white : AppColors.textSecondary);
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? accent.withValues(alpha: .18) : AppColors.glassFill,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? accent.withValues(alpha: .85) : AppColors.stroke,
+            width: selected ? 1.4 : 1,
+          ),
+          boxShadow: selected
+              ? [BoxShadow(color: accent.withValues(alpha: .35), blurRadius: 12)]
+              : null,
+        ),
+        child: Text(label, style: style),
       ),
     );
   }
@@ -389,7 +548,17 @@ class _TurnViewState extends State<_TurnView> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const _PlayersStrip(),
-            const SizedBox(height: 16),
+            const SizedBox(height: 10),
+            Center(
+              child: Text(
+                'جولة ${room.roundNumber} / ${room.totalRounds}',
+                style: AppText.number(
+                    size: 13,
+                    weight: FontWeight.w700,
+                    color: AppColors.textSecondary),
+              ),
+            ),
+            const SizedBox(height: 10),
             if (country != null)
               Center(child: CountryCard(country: country)),
             const SizedBox(height: 18),
@@ -551,7 +720,30 @@ class _VotingView extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 20),
-            if (room.myVoteCast)
+            if (room.isMyTurn)
+              // No judging your own fact — the server enforces it, the UI
+              // never offers it.
+              GlassContainer(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'بانتظار تصويت الخصم والحكم... (${room.votesCast}/${room.votesNeeded})',
+                        style:
+                            AppText.ui(size: 13.5, weight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else if (room.myVoteCast)
               Text(
                 'صوتك وصل ✔ — مستنيين الباقيين (${room.votesCast}/${room.votesNeeded})',
                 textAlign: TextAlign.center,

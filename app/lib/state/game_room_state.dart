@@ -53,7 +53,8 @@ class GameRoomState extends ChangeNotifier {
   OnlinePhase phase = OnlinePhase.connecting;
   String roomCode = '';
   String hostId = '';
-  int targetScore = 5;
+  int totalRounds = 5;
+  String difficulty = 'progressive';
   int roundNumber = 0;
   List<OnlinePlayer> players = [];
   String? currentPlayerId;
@@ -83,6 +84,10 @@ class GameRoomState extends ChangeNotifier {
 
   bool get iAmHost => myId == hostId;
   bool get isMyTurn => currentPlayerId == myId;
+
+  /// Self-voting is server-blocked; mirror it so the UI hides the buttons.
+  bool get canVote =>
+      phase == OnlinePhase.awaitingVotes && !isMyTurn && !myVoteCast;
   OnlinePlayer? playerById(String? id) =>
       players.where((p) => p.id == id).firstOrNull;
   OnlinePlayer? get currentPlayer => playerById(currentPlayerId);
@@ -90,9 +95,12 @@ class GameRoomState extends ChangeNotifier {
   // -- Connection lifecycle ------------------------------------------------
 
   /// Reserve a fresh room, then join it. Returns the room code.
-  Future<String> createAndJoin({int targetScore = 5}) async {
-    final code =
-        await _service.createRoom(token: token, targetScore: targetScore);
+  Future<String> createAndJoin({
+    int totalRounds = 5,
+    String difficulty = 'progressive',
+  }) async {
+    final code = await _service.createRoom(
+        token: token, totalRounds: totalRounds, difficulty: difficulty);
     join(code);
     return code;
   }
@@ -121,6 +129,15 @@ class GameRoomState extends ChangeNotifier {
   // -- Outbound actions ----------------------------------------------------
 
   void startGame() => _conn?.send({'action': 'start_game'});
+
+  /// Host-only lobby knobs; the server validates and broadcasts
+  /// `settings_updated`, which is what actually mutates local state.
+  void updateSettings({int? totalRounds, String? difficulty}) =>
+      _conn?.send({
+        'action': 'update_settings',
+        'total_rounds': ?totalRounds,
+        'difficulty': ?difficulty,
+      });
 
   void submitFact(String text) =>
       _conn?.send({'action': 'submit_fact', 'text': text});
@@ -154,8 +171,12 @@ class GameRoomState extends ChangeNotifier {
         }
       case HostChanged(:final hostId):
         this.hostId = hostId;
-      case GameStarted(:final targetScore):
-        this.targetScore = targetScore;
+      case GameStarted(:final totalRounds, :final difficulty):
+        this.totalRounds = totalRounds;
+        this.difficulty = difficulty;
+      case SettingsUpdated(:final totalRounds, :final difficulty):
+        this.totalRounds = totalRounds;
+        this.difficulty = difficulty;
       case NextTurn(:final round, :final playerId, :final country):
         roundNumber = round;
         currentPlayerId = playerId;
@@ -214,7 +235,8 @@ class GameRoomState extends ChangeNotifier {
   void _applySnapshot(RoomSnapshot snap) {
     roomCode = snap.roomCode;
     hostId = snap.hostId;
-    targetScore = snap.targetScore;
+    totalRounds = snap.totalRounds;
+    difficulty = snap.difficulty;
     roundNumber = snap.roundNumber;
     currentPlayerId = snap.currentPlayerId;
     country = snap.country;

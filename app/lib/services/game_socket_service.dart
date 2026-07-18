@@ -39,7 +39,8 @@ class GameWebSocketService {
   /// Generous timeout: the free-tier server may be cold-starting.
   Future<String> createRoom({
     required String token,
-    int targetScore = 5,
+    int totalRounds = 5,
+    String difficulty = 'progressive',
   }) async {
     final resp = await _client
         .post(
@@ -48,7 +49,8 @@ class GameWebSocketService {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer $token',
           },
-          body: jsonEncode({'target_score': targetScore}),
+          body: jsonEncode(
+              {'total_rounds': totalRounds, 'difficulty': difficulty}),
         )
         .timeout(const Duration(seconds: 75));
     if (resp.statusCode != 200) {

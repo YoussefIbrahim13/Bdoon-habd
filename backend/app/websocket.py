@@ -21,7 +21,8 @@ actions, broadcasts the returned events, and persists final results.
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+import random
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
@@ -29,6 +30,7 @@ from fastapi.exceptions import HTTPException
 from pydantic import BaseModel, Field
 
 from .auth import get_current_player, resolve_player_by_token
+from .countries import difficulty_of
 from .db import Player, get_db, _SessionLocal  # noqa: PLC2701 - session factory
 from .rooms import Room, RoomError, RoomManager, RoomPhase
 
@@ -66,6 +68,34 @@ def get_room_manager() -> RoomManager:
 # --------------------------------------------------------------------------
 
 
+def make_country_provider(countries: list[dict[str, Any]]):
+    """Difficulty-aware country drawer for the room engine.
+
+    Tiers are precomputed once. 'easy' and 'hard' pull from their pool;
+    'progressive' slides across easy → medium → hard as the match advances
+    (round 1 of N is famous, round N is obscure). Thin pools fall back to
+    the full list so a match can never stall on an empty tier.
+    """
+    pools: dict[str, list[dict[str, Any]]] = {"easy": [], "medium": [], "hard": []}
+    for c in countries:
+        pools[difficulty_of(c["code"])].append(c)
+
+    def provider(
+        difficulty: str, round_number: int, total_rounds: int
+    ) -> dict[str, Any]:
+        if difficulty in ("easy", "hard"):
+            tier = difficulty
+        else:  # progressive: 0..1 across the match → easy/medium/hard thirds
+            progress = (round_number - 1) / max(1, total_rounds - 1)
+            tier = "easy" if progress < 1 / 3 else (
+                "medium" if progress < 2 / 3 else "hard"
+            )
+        pool = pools.get(tier) or countries
+        return random.choice(pool)
+
+    return provider
+
+
 async def stub_fact_evaluator(
     country: dict[str, Any], fact: str
 ) -> dict[str, Any]:
@@ -88,12 +118,14 @@ async def stub_fact_evaluator(
 
 
 class CreateRoomRequest(BaseModel):
-    target_score: int = Field(default=5, ge=1, le=20)
+    total_rounds: int = Field(default=5, ge=1, le=20)
+    difficulty: Literal["easy", "hard", "progressive"] = "progressive"
 
 
 class CreateRoomResponse(BaseModel):
     room_code: str
-    target_score: int
+    total_rounds: int
+    difficulty: str
 
 
 @router.post("/api/rooms", response_model=CreateRoomResponse)
@@ -104,9 +136,15 @@ async def create_room(
     """Reserve a room; the host then joins it over the WebSocket like
     everyone else (one join path = one set of bugs)."""
     room = await get_room_manager().create_room(
-        player.id, target_score=body.target_score
+        player.id,
+        total_rounds=body.total_rounds,
+        difficulty=body.difficulty,
     )
-    return CreateRoomResponse(room_code=room.code, target_score=room.target_score)
+    return CreateRoomResponse(
+        room_code=room.code,
+        total_rounds=room.total_rounds,
+        difficulty=room.difficulty,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -129,10 +167,12 @@ async def _broadcast(room: Room, events: list[dict[str, Any]]) -> None:
 
 def _persist_results(room: Room) -> None:
     """Write final stats into Postgres via the normal session pattern."""
-    winner_ids = set()
+    # Mirror the match rule: a SOLE top scorer gets the win; ties get none.
+    winner_ids: set[str] = set()
     top = max((p.score for p in room.players.values()), default=0)
-    if top >= room.target_score:
-        winner_ids = {p.id for p in room.players.values() if p.score == top}
+    leaders = [p.id for p in room.players.values() if p.score == top]
+    if top > 0 and len(leaders) == 1:
+        winner_ids = {leaders[0]}
     db = _SessionLocal()
     try:
         for rp in room.players.values():
@@ -195,6 +235,18 @@ async def game_socket(websocket: WebSocket, room_code: str) -> None:
             try:
                 if action == "start_game":
                     events = await manager.start_game(room, player.id)
+                    await _broadcast(room, events)
+                elif action == "update_settings":
+                    events = await manager.update_settings(
+                        room,
+                        player.id,
+                        total_rounds=(
+                            int(message["total_rounds"])
+                            if "total_rounds" in message
+                            else None
+                        ),
+                        difficulty=message.get("difficulty"),
+                    )
                     await _broadcast(room, events)
                 elif action == "submit_fact":
                     events = await manager.submit_fact(

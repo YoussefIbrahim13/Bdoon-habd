@@ -18,14 +18,12 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-import random
-
 from .admin import router as admin_router
 from .auth import router as auth_router
 from .countries import fact_sheet, find_country, load_countries
 from .db import init_db
 from .verifier import SmartJudge
-from .websocket import init_room_manager
+from .websocket import init_room_manager, make_country_provider
 from .websocket import router as ws_router
 
 logging.basicConfig(level=logging.INFO)
@@ -88,8 +86,9 @@ async def lifespan(app: FastAPI):
     app.state.verdict_cache = {}
     app.state.rate_buckets = {}
     app.state.global_bucket = []
-    # Online multiplayer rooms draw from the loaded country dataset.
-    init_room_manager(lambda: random.choice(app.state.countries))
+    # Online multiplayer rooms draw from the loaded country dataset,
+    # tiered by flag recognizability for the difficulty settings.
+    init_room_manager(make_country_provider(app.state.countries))
     yield
 
 
