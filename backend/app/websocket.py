@@ -29,6 +29,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import HTTPException
 from pydantic import BaseModel, Field
 
+from . import presence
 from .auth import get_current_player, resolve_player_by_token
 from .countries import difficulty_of
 from .db import Player, get_db, _SessionLocal  # noqa: PLC2701 - session factory
@@ -220,6 +221,9 @@ async def game_socket(websocket: WebSocket, room_code: str) -> None:
         await websocket.close(code=WS_ROOM_FULL)
         return
 
+    # Mark the player online app-wide so friend requests can reach them here.
+    presence.register(player.id, websocket)
+
     # Snapshot to the newcomer first, then announce them to the room.
     await websocket.send_json(room.snapshot())
     await _broadcast(room, join_events)
@@ -269,6 +273,7 @@ async def game_socket(websocket: WebSocket, room_code: str) -> None:
     except WebSocketDisconnect:
         pass
     finally:
+        presence.unregister(player.id, websocket)
         events = await manager.handle_disconnect(room, player.id)
         await _broadcast(room, events)
         await _maybe_persist(room)

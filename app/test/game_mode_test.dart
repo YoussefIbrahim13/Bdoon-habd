@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/testing.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -11,6 +13,8 @@ import 'package:el_hakem/screens/online_hub_screen.dart';
 import 'package:el_hakem/screens/sign_in_screen.dart';
 import 'package:el_hakem/services/api_service.dart';
 import 'package:el_hakem/services/auth_service.dart';
+import 'package:el_hakem/services/friendship_service.dart';
+import 'package:el_hakem/state/friendship_state.dart';
 import 'package:el_hakem/state/game_state.dart';
 
 Future<(GameState, AuthService)> _pump(WidgetTester tester) async {
@@ -23,6 +27,16 @@ Future<(GameState, AuthService)> _pump(WidgetTester tester) async {
         Provider<ApiService>(create: (_) => ApiService()),
         ChangeNotifierProvider<GameState>.value(value: game),
         ChangeNotifierProvider<AuthService>.value(value: auth),
+        // The online hub's bell reads FriendshipState; stub its HTTP with a
+        // MockClient so refresh() never touches the network in tests.
+        ChangeNotifierProvider<FriendshipState>(
+          create: (_) => FriendshipState(
+            auth: auth,
+            service: FriendshipService(
+              client: MockClient((_) async => http.Response('[]', 200)),
+            ),
+          ),
+        ),
       ],
       child: MaterialApp(
         builder: (context, child) =>

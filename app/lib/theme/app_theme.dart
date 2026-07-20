@@ -5,19 +5,26 @@ import 'package:flutter/material.dart';
 /// ---------------------------------------------------------------------------
 
 abstract final class AppColors {
-  // Deep obsidian, not pure black.
-  static const bg = Color(0xFF0E0F14);
-  static const surface = Color(0xFF161821);
-  static const surfaceActive = Color(0xFF1A1E2E);
+  // NovaPay dark-violet base: near-black violet, not neutral obsidian.
+  static const bg = Color(0xFF0B0714);
+  static const surface = Color(0xFF140F22);
+  static const surfaceActive = Color(0xFF1C1533);
 
-  // Glass fills / hairline strokes.
-  static const glassTint = Color(0x14FFFFFF); // 8% white
-  static const glassFill = Color(0x0FFFFFFF); // 6% white
-  static const stroke = Color(0x1FFFFFFF); // 12% white
+  // Glass fills / hairline strokes — violet-tinted glass over the dark base.
+  static const glassTint = Color(0x147C5CFF); // ~8% violet
+  static const glassFill = Color(0x0F7C5CFF); // ~6% violet
+  static const stroke = Color(0x14FFFFFF); // 8% white hairline
 
-  // Accents.
-  static const electricBlue = Color(0xFF3D9BFF);
-  static const neonPurple = Color(0xFFA855F7);
+  // Brand violet (NovaPay).
+  static const primaryViolet = Color(0xFF7C5CFF); // filled buttons / main accent
+  static const displayViolet = Color(0xFF6D4AFF); // big headline fills
+  static const accentGlow = Color(0xFF9B7BFF); // soft glows behind hero elements
+
+  // Secondary + functional accents. electricBlue doubles as the NovaPay cyan
+  // highlight (city-lights); emerald/ruby/amber carry GAMEPLAY meaning
+  // (correct / wrong / uncertain) and are intentionally NOT recolored.
+  static const electricBlue = Color(0xFF22D3EE);
+  static const neonPurple = Color(0xFF9B7BFF); // glow alias, aligned to accentGlow
   static const emerald = Color(0xFF34D399);
   static const emeraldDeep = Color(0xFF059669);
   static const ruby = Color(0xFFFB7185);
@@ -25,8 +32,8 @@ abstract final class AppColors {
   static const amber = Color(0xFFFBBF24);
   static const amberDeep = Color(0xFFD97706);
 
-  static const textPrimary = Color(0xFFF4F5F7);
-  static const textSecondary = Color(0xFF9AA3B2);
+  static const textPrimary = Color(0xFFFFFFFF);
+  static const textSecondary = Color(0xFFB8AECD); // muted lavender-grey
 
   /// Per-player neon identity (seat order): cyan, purple, neon green,
   /// neon pink. Shared by the setup fields and the in-game scoreboard so a
@@ -40,11 +47,11 @@ abstract final class AppColors {
 }
 
 abstract final class AppGradients {
-  /// Active player turn / primary actions.
+  /// Brand / primary actions / active player — NovaPay violet.
   static const turn = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [AppColors.electricBlue, AppColors.neonPurple],
+    colors: [AppColors.accentGlow, AppColors.displayViolet],
   );
 
   /// Smart Judge: verdict "true".
@@ -105,6 +112,26 @@ abstract final class AppShadows {
 /// explicitly via [FontVariation] (plain [FontWeight] alone would render the
 /// default instance).
 abstract final class AppText {
+  /// Massive NovaPay display headline. Cairo at its heaviest (w900) so it
+  /// renders Arabic AND Latin (Anton/Archivo Black have no Arabic glyphs),
+  /// with tight line-height and negative tracking for that condensed,
+  /// dominating-negative-space look.
+  static TextStyle display({
+    double size = 48,
+    Color color = AppColors.textPrimary,
+    double height = 0.92,
+    double spacing = -1.5,
+  }) =>
+      TextStyle(
+        fontFamily: 'Cairo',
+        fontSize: size,
+        fontWeight: FontWeight.w900,
+        fontVariations: const [FontVariation('wght', 900)],
+        color: color,
+        height: height,
+        letterSpacing: spacing,
+      );
+
   /// Cairo — Arabic-first UI text (also covers Latin).
   static TextStyle ui({
     double size = 14,

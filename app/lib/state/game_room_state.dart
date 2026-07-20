@@ -81,6 +81,12 @@ class GameRoomState extends ChangeNotifier {
   String lastError = '';
   int errorsSeen = 0;
 
+  /// A friend-request push that rode this game socket (presence). The screen
+  /// forwards it to FriendshipState — GameRoomState just relays it, staying
+  /// decoupled from the friends layer.
+  FriendRequestPushed? lastFriendRequest;
+  int friendRequestsSeen = 0;
+
   /// Human-readable reason once [phase] is [OnlinePhase.disconnected].
   String disconnectReason = '';
 
@@ -242,6 +248,9 @@ class GameRoomState extends ChangeNotifier {
             _ => 'الاتصال بالسيرفر اتقطع.',
           };
         }
+      case FriendRequestPushed():
+        lastFriendRequest = event;
+        friendRequestsSeen++;
       case UnknownEvent():
         break; // forward-compatibility: ignore what we don't know
     }

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'screens/splash_view.dart';
 import 'services/api_service.dart';
 import 'services/auth_service.dart';
+import 'state/friendship_state.dart';
 import 'state/game_state.dart';
 import 'theme/app_theme.dart';
 
@@ -30,6 +31,10 @@ class BedoonHabdApp extends StatelessWidget {
         // Session restore kicks off immediately: by the time the splash
         // hands over to the gateway, a persisted sign-in is already live.
         ChangeNotifierProvider(create: (_) => AuthService()..restoreSession()),
+        // Friends system reads the JWT from AuthService (provided above).
+        ChangeNotifierProvider(
+          create: (ctx) => FriendshipState(auth: ctx.read<AuthService>()),
+        ),
       ],
       child: MaterialApp(
         title: 'بدون هبد!',

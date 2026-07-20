@@ -4,7 +4,9 @@ import 'package:provider/provider.dart';
 
 import '../services/auth_service.dart';
 import '../services/game_socket_service.dart';
+import '../state/friendship_state.dart';
 import '../theme/app_theme.dart';
+import '../widgets/friend_widgets.dart';
 import '../widgets/game_button.dart';
 import '../widgets/glass_container.dart';
 import 'game_room_screen.dart';
@@ -22,6 +24,14 @@ class _OnlineHubScreenState extends State<OnlineHubScreen> {
   final _codeController = TextEditingController();
   final _service = GameWebSocketService();
   bool _creating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pull friends + pending so the bell badge and podium buttons are fresh.
+    WidgetsBinding.instance.addPostFrameCallback(
+        (_) => context.read<FriendshipState>().refresh());
+  }
 
   @override
   void dispose() {
@@ -89,6 +99,7 @@ class _OnlineHubScreenState extends State<OnlineHubScreen> {
         backgroundColor: Colors.transparent,
         title: Text('لعب أونلاين',
             style: AppText.ui(size: 18, weight: FontWeight.w800)),
+        actions: const [FriendRequestsBell(), SizedBox(width: 4)],
       ),
       body: Stack(
         children: [

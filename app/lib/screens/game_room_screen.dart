@@ -5,9 +5,12 @@ import 'package:provider/provider.dart';
 
 import '../models/game_events.dart';
 import '../services/auth_service.dart';
+import '../services/friendship_service.dart';
+import '../state/friendship_state.dart';
 import '../state/game_room_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/country_card.dart';
+import '../widgets/friend_widgets.dart';
 import '../widgets/game_button.dart';
 import '../widgets/glass_container.dart';
 
@@ -48,6 +51,7 @@ class _GameRoomViewState extends State<_GameRoomView> {
   int _seenRounds = 0;
   int _seenErrors = 0;
   int _seenTimeouts = 0;
+  int _seenFriendReqs = 0;
 
   @override
   void initState() {
@@ -56,6 +60,7 @@ class _GameRoomViewState extends State<_GameRoomView> {
     _seenRounds = _room.roundsCompleted;
     _seenErrors = _room.errorsSeen;
     _seenTimeouts = _room.timeoutsSeen;
+    _seenFriendReqs = _room.friendRequestsSeen;
     _room.addListener(_onRoomChanged);
   }
 
@@ -76,6 +81,25 @@ class _GameRoomViewState extends State<_GameRoomView> {
       _seenTimeouts = _room.timeoutsSeen;
       final name = _room.playerById(_room.lastTimedOutPlayerId)?.name ?? '';
       _snack('⏰ خلص وقت $name — الجولة راحت عليه!', AppColors.ruby);
+    }
+    // A friend request rode the game socket — hand it to the friends state so
+    // the bell badge (and requests center) update live, and nudge the player.
+    if (_room.friendRequestsSeen != _seenFriendReqs) {
+      _seenFriendReqs = _room.friendRequestsSeen;
+      final req = _room.lastFriendRequest;
+      if (req != null) {
+        context.read<FriendshipState>().onIncomingRequest(
+              PendingRequest(
+                requestId: req.requestId,
+                sender: Friend(
+                  id: req.senderId,
+                  name: req.senderName,
+                  picture: req.senderPicture,
+                ),
+              ),
+            );
+        _snack('👋 ${req.senderName} عايز يضيفك صاحب!', AppColors.primaryViolet);
+      }
     }
     if (_room.roundsCompleted != _seenRounds) {
       _seenRounds = _room.roundsCompleted;
@@ -1025,9 +1049,16 @@ class _GameOverView extends StatelessWidget {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(p.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: AppText.ui(
                                       size: 14.5, weight: FontWeight.w700)),
                             ),
+                            // Add-friend for everyone but yourself.
+                            if (p.id != room.myId) ...[
+                              AddFriendButton(playerId: p.id),
+                              const SizedBox(width: 10),
+                            ],
                             Text('${p.score}',
                                 style: AppText.number(
                                     size: 20, weight: FontWeight.w800)),

@@ -17,7 +17,18 @@ import uuid
 from collections.abc import Iterator
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer, String, create_engine, inspect, text
+import enum
+
+from sqlalchemy import (
+    DateTime,
+    Enum as SAEnum,
+    Integer,
+    String,
+    UniqueConstraint,
+    create_engine,
+    inspect,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -88,6 +99,40 @@ class Player(Base):
     # disabled: hidden from admin listings and rejected by every auth guard.
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
+    )
+
+
+class FriendStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+
+
+class Friendship(Base):
+    """A directed friend relationship: [sender] asked [receiver].
+
+    The (sender_id, receiver_id) unique constraint blocks duplicate requests
+    in the SAME direction; the reverse direction (B → A while A → B exists)
+    is caught in the endpoint layer, which also treats an ACCEPTED row as a
+    mutual friendship regardless of who sent it.
+    """
+
+    __tablename__ = "friendships"
+    __table_args__ = (
+        UniqueConstraint("sender_id", "receiver_id", name="uq_friendship_pair"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    sender_id: Mapped[str] = mapped_column(String(36), index=True)
+    receiver_id: Mapped[str] = mapped_column(String(36), index=True)
+    status: Mapped[FriendStatus] = mapped_column(
+        SAEnum(FriendStatus, native_enum=False, length=16),
+        default=FriendStatus.PENDING,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
     )
 
 

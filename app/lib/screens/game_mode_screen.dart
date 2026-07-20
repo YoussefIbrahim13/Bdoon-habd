@@ -5,7 +5,8 @@ import 'package:provider/provider.dart';
 
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
-import '../widgets/app_logo.dart';
+import '../widgets/nova_components.dart';
+import '../widgets/rotating_globe.dart';
 import 'home_screen.dart';
 import 'online_hub_screen.dart';
 import 'sign_in_screen.dart';
@@ -109,22 +110,38 @@ class _GameModeScreenState extends State<GameModeScreen>
                       ];
                       return Column(
                         children: [
-                          const AppLogo(size: 116, animate: true),
-                          const SizedBox(height: 18),
-                          ShaderMask(
-                            shaderCallback: (r) =>
-                                AppGradients.turn.createShader(r),
-                            child: Text(
-                              'بدون هبد!',
-                              textAlign: TextAlign.center,
-                              style: AppText.ui(
-                                size: 36,
-                                weight: FontWeight.w800,
-                                color: Colors.white,
-                              ),
+                          // Hero: the rotating Earth sits behind the wordmark.
+                          SizedBox(
+                            height: 260,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                const RotatingGlobe(size: 240),
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const DisplayHeadline(
+                                      'بدون\nهبد!',
+                                      size: 60,
+                                      gradient: true,
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      'كوكب واحد · تحدٍّ واحد',
+                                      textAlign: TextAlign.center,
+                                      style: AppText.ui(
+                                        size: 13,
+                                        weight: FontWeight.w600,
+                                        color: AppColors.textSecondary,
+                                        spacing: 2,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 18),
                           Text(
                             'اختار طريقة اللعب',
                             style: AppText.ui(
@@ -132,7 +149,7 @@ class _GameModeScreenState extends State<GameModeScreen>
                               color: AppColors.textSecondary,
                             ),
                           ),
-                          const SizedBox(height: 30),
+                          const SizedBox(height: 24),
                           // Side-by-side on wide screens, stacked on phones.
                           // IntrinsicHeight equalizes the two card heights —
                           // plain stretch would demand infinite height inside

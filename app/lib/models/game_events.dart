@@ -118,6 +118,14 @@ sealed class GameEvent {
           playerId: json['player_id'] as String,
           round: (json['round'] as num).toInt(),
         );
+      case 'friend_request_received':
+        final s = (json['sender'] as Map).cast<String, dynamic>();
+        return FriendRequestPushed(
+          requestId: json['request_id'] as String,
+          senderId: s['id'] as String,
+          senderName: s['name'] as String? ?? 'لاعب',
+          senderPicture: s['picture'] as String?,
+        );
       case 'fact_submitted':
         return FactSubmitted(
           playerId: json['player_id'] as String,
@@ -256,6 +264,21 @@ class TurnTimedOut extends GameEvent {
   final String playerId;
   final int round;
   const TurnTimedOut({required this.playerId, required this.round});
+}
+
+/// A friend request arrived over the game socket (presence push). Not a room
+/// event — the room screen forwards it to the friends state.
+class FriendRequestPushed extends GameEvent {
+  final String requestId;
+  final String senderId;
+  final String senderName;
+  final String? senderPicture;
+  const FriendRequestPushed({
+    required this.requestId,
+    required this.senderId,
+    required this.senderName,
+    required this.senderPicture,
+  });
 }
 
 class FactSubmitted extends GameEvent {
