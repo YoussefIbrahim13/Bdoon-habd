@@ -10,12 +10,17 @@ class Friend {
   final String name;
   final String? picture;
 
-  const Friend({required this.id, required this.name, this.picture});
+  /// True when the friend has a live socket somewhere (invitable now).
+  final bool online;
+
+  const Friend(
+      {required this.id, required this.name, this.picture, this.online = false});
 
   factory Friend.fromJson(Map<String, dynamic> json) => Friend(
         id: json['id'] as String,
         name: json['name'] as String? ?? 'لاعب',
         picture: json['picture'] as String?,
+        online: json['online'] as bool? ?? false,
       );
 }
 

@@ -126,6 +126,12 @@ sealed class GameEvent {
           senderName: s['name'] as String? ?? 'لاعب',
           senderPicture: s['picture'] as String?,
         );
+      case 'room_invite_received':
+        return RoomInvitePushed(
+          roomCode: json['room_code'] as String,
+          senderId: json['sender_id'] as String,
+          senderName: json['sender_name'] as String? ?? 'صاحبك',
+        );
       case 'fact_submitted':
         return FactSubmitted(
           playerId: json['player_id'] as String,
@@ -278,6 +284,19 @@ class FriendRequestPushed extends GameEvent {
     required this.senderId,
     required this.senderName,
     required this.senderPicture,
+  });
+}
+
+/// A friend invited me to their room (presence push). The room screen shows
+/// a Join/Decline banner.
+class RoomInvitePushed extends GameEvent {
+  final String roomCode;
+  final String senderId;
+  final String senderName;
+  const RoomInvitePushed({
+    required this.roomCode,
+    required this.senderId,
+    required this.senderName,
   });
 }
 

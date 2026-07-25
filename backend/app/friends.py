@@ -54,6 +54,9 @@ class FriendOut(BaseModel):
     id: str
     name: str
     picture: str | None
+    # True when this friend has a live socket somewhere (invitable). Only
+    # meaningful in the friends list; defaults False elsewhere.
+    online: bool = False
 
 
 class RequestOut(BaseModel):
@@ -80,13 +83,24 @@ def _between(a: str, b: str):
     )
 
 
-def _person(db: Session, player_id: str) -> FriendOut:
+def _person(db: Session, player_id: str, *, online: bool = False) -> FriendOut:
     p = db.get(Player, player_id)
     return FriendOut(
         id=player_id,
         name=p.name if p else "لاعب",
         picture=p.picture if p else None,
+        online=online,
     )
+
+
+def are_friends(db: Session, a: str, b: str) -> bool:
+    """True iff an ACCEPTED friendship exists between a and b (either way)."""
+    row = db.execute(
+        select(Friendship).where(
+            and_(Friendship.status == FriendStatus.ACCEPTED, _between(a, b))
+        )
+    ).scalars().first()
+    return row is not None
 
 
 # --------------------------------------------------------------------------
@@ -201,7 +215,7 @@ def get_friends_list(
     friends = []
     for r in rows:
         other = r.receiver_id if r.sender_id == me.id else r.sender_id
-        friends.append(_person(db, other))
+        friends.append(_person(db, other, online=presence.is_online(other)))
     return friends
 
 

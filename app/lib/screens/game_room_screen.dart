@@ -13,6 +13,7 @@ import '../widgets/country_card.dart';
 import '../widgets/friend_widgets.dart';
 import '../widgets/game_button.dart';
 import '../widgets/glass_container.dart';
+import '../widgets/nova_components.dart';
 
 /// Live multiplayer room. Owns a [GameRoomState] scoped to this screen —
 /// the provider disposes it on exit, which closes the socket and cancels
@@ -52,6 +53,8 @@ class _GameRoomViewState extends State<_GameRoomView> {
   int _seenErrors = 0;
   int _seenTimeouts = 0;
   int _seenFriendReqs = 0;
+  int _seenInvites = 0;
+  RoomInvitePushed? _pendingInvite;
 
   @override
   void initState() {
@@ -61,6 +64,7 @@ class _GameRoomViewState extends State<_GameRoomView> {
     _seenErrors = _room.errorsSeen;
     _seenTimeouts = _room.timeoutsSeen;
     _seenFriendReqs = _room.friendRequestsSeen;
+    _seenInvites = _room.roomInvitesSeen;
     _room.addListener(_onRoomChanged);
   }
 
@@ -99,6 +103,13 @@ class _GameRoomViewState extends State<_GameRoomView> {
               ),
             );
         _snack('👋 ${req.senderName} عايز يضيفك صاحب!', AppColors.primaryViolet);
+      }
+    }
+    // A friend invited me to their room → raise the Join/Decline banner.
+    if (_room.roomInvitesSeen != _seenInvites) {
+      _seenInvites = _room.roomInvitesSeen;
+      if (_room.lastRoomInvite != null) {
+        setState(() => _pendingInvite = _room.lastRoomInvite);
       }
     }
     if (_room.roundsCompleted != _seenRounds) {
@@ -173,8 +184,32 @@ class _GameRoomViewState extends State<_GameRoomView> {
               },
             ),
           ),
+          // Incoming room-invite banner (Join / Decline), floats at the top.
+          if (_pendingInvite != null)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                child: _InviteBanner(
+                  invite: _pendingInvite!,
+                  onJoin: _joinInvitedRoom,
+                  onDismiss: () => setState(() => _pendingInvite = null),
+                ),
+              ),
+            ),
         ],
       ),
+    );
+  }
+
+  void _joinInvitedRoom() {
+    final code = _pendingInvite!.roomCode;
+    setState(() => _pendingInvite = null);
+    // Replace this room with the invited one (existing join flow handles a
+    // full/started room by landing on the disconnected view with the reason).
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => GameRoomScreen(roomCode: code)),
     );
   }
 }
@@ -357,7 +392,14 @@ class _LobbyView extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 16),
+              // Anyone in the room (host or guest) can invite online friends.
+              PillButton.ghost(
+                label: 'ادعُ أصحابك',
+                icon: Icons.person_add_alt_1_rounded,
+                onPressed: () => showInviteFriends(context),
+              ),
+              const SizedBox(height: 14),
               if (room.iAmHost)
                 // Always tappable: the SERVER owns the minimum-players rule
                 // (env-configurable, e.g. solo testing) — if there aren't
@@ -1110,6 +1152,284 @@ class _DisconnectedView extends StatelessWidget {
               icon: Icons.arrow_back_rounded,
               borderGradient: AppGradients.turn,
               onPressed: () => Navigator.of(context).pop(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Invite friends modal — lists friends, Invite button per ONLINE friend.
+// ---------------------------------------------------------------------------
+
+/// Open the invite sheet. Both the friends list ([FriendshipState]) and the
+/// room socket ([GameRoomState]) are handed down via .value, since the modal
+/// builds under the navigator root (outside the room screen's provider).
+Future<void> showInviteFriends(BuildContext context) {
+  final friends = context.read<FriendshipState>();
+  final room = context.read<GameRoomState>();
+  friends.refresh(); // freshen online status
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    barrierColor: Colors.black.withValues(alpha: .55),
+    builder: (_) => MultiProvider(
+      providers: [
+        ChangeNotifierProvider<FriendshipState>.value(value: friends),
+        ChangeNotifierProvider<GameRoomState>.value(value: room),
+      ],
+      child: const _InviteFriendsSheet(),
+    ),
+  );
+}
+
+class _InviteFriendsSheet extends StatelessWidget {
+  const _InviteFriendsSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    final friends = context.watch<FriendshipState>().friends;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: GlassCard(
+          radius: 26,
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const DisplayHeadline('ادعُ أصحابك', size: 22),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded,
+                        color: AppColors.textSecondary),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              if (friends.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 28),
+                  child: Text('لسه مفيش أصحاب — ضيف ناس بعد الماتش! 🤝',
+                      textAlign: TextAlign.center,
+                      style: AppText.ui(
+                          size: 14, color: AppColors.textSecondary)),
+                )
+              else
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                      maxHeight: MediaQuery.sizeOf(context).height * .5),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: friends.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (context, i) =>
+                        _InviteRow(friend: friends[i]),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InviteRow extends StatelessWidget {
+  final Friend friend;
+
+  const _InviteRow({required this.friend});
+
+  @override
+  Widget build(BuildContext context) {
+    final sent =
+        context.select((GameRoomState r) => r.hasInvited(friend.id));
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.glassFill,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.stroke),
+      ),
+      child: Row(
+        children: [
+          Stack(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: AppColors.surfaceActive,
+                backgroundImage: friend.picture != null
+                    ? NetworkImage(friend.picture!)
+                    : null,
+                child: friend.picture == null
+                    ? Text(
+                        friend.name.isEmpty ? '؟' : friend.name.characters.first,
+                        style: AppText.ui(size: 14, weight: FontWeight.w800))
+                    : null,
+              ),
+              if (friend.online)
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    width: 11,
+                    height: 11,
+                    decoration: BoxDecoration(
+                      color: AppColors.emerald,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.surface, width: 2),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(friend.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.ui(size: 14.5, weight: FontWeight.w700)),
+                Text(friend.online ? 'أونلاين' : 'أوفلاين',
+                    style: AppText.ui(
+                        size: 11,
+                        weight: FontWeight.w700,
+                        color: friend.online
+                            ? AppColors.emerald
+                            : AppColors.textSecondary)),
+              ],
+            ),
+          ),
+          if (sent)
+            const _MutedTag(icon: Icons.check_rounded, label: 'تم الإرسال')
+          else if (!friend.online)
+            const _MutedTag(icon: Icons.circle_outlined, label: 'مش متاح')
+          else
+            Material(
+              color: AppColors.primaryViolet.withValues(alpha: .16),
+              borderRadius: BorderRadius.circular(999),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: () =>
+                    context.read<GameRoomState>().inviteFriend(friend.id),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                        color: AppColors.primaryViolet.withValues(alpha: .6)),
+                  ),
+                  child: Text('دعوة',
+                      style: AppText.ui(
+                          size: 12.5,
+                          weight: FontWeight.w800,
+                          color: AppColors.primaryViolet)),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MutedTag extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _MutedTag({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.stroke),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: AppColors.textSecondary),
+          const SizedBox(width: 5),
+          Text(label,
+              style: AppText.ui(
+                  size: 11.5,
+                  weight: FontWeight.w700,
+                  color: AppColors.textSecondary)),
+        ],
+      ),
+    );
+  }
+}
+
+/// The floating incoming-invite banner with Join (emerald) / Decline (ruby).
+class _InviteBanner extends StatelessWidget {
+  final RoomInvitePushed invite;
+  final VoidCallback onJoin;
+  final VoidCallback onDismiss;
+
+  const _InviteBanner({
+    required this.invite,
+    required this.onJoin,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+      child: GlassCard(
+        radius: 20,
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '👋 ${invite.senderName} عازمك تدخل أوضته',
+              textAlign: TextAlign.center,
+              style: AppText.ui(size: 14.5, weight: FontWeight.w800),
+            ),
+            const SizedBox(height: 4),
+            Text('كود الأوضة ${invite.roomCode}',
+                style: AppText.number(
+                    size: 12.5,
+                    weight: FontWeight.w700,
+                    color: AppColors.textSecondary)),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: GameButton(
+                    label: 'تجاهل',
+                    height: 46,
+                    gradient: AppGradients.falsehood,
+                    glowColor: AppColors.rubyDeep,
+                    onPressed: onDismiss,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: GameButton(
+                    label: 'دخول',
+                    icon: Icons.login_rounded,
+                    height: 46,
+                    gradient: AppGradients.truth,
+                    glowColor: AppColors.emeraldDeep,
+                    onPressed: onJoin,
+                  ),
+                ),
+              ],
             ),
           ],
         ),

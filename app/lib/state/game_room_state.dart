@@ -87,6 +87,15 @@ class GameRoomState extends ChangeNotifier {
   FriendRequestPushed? lastFriendRequest;
   int friendRequestsSeen = 0;
 
+  /// A room-invite push (a friend invited me to their room). The screen shows
+  /// a Join/Decline banner.
+  RoomInvitePushed? lastRoomInvite;
+  int roomInvitesSeen = 0;
+
+  /// Friend ids I've invited to THIS room, so their Invite button flips to
+  /// "Sent". Cleared implicitly by leaving the room (state is disposed).
+  final Set<String> invitedFriendIds = {};
+
   /// Human-readable reason once [phase] is [OnlinePhase.disconnected].
   String disconnectReason = '';
 
@@ -155,6 +164,17 @@ class GameRoomState extends ChangeNotifier {
 
   void submitFact(String text) =>
       _conn?.send({'action': 'submit_fact', 'text': text});
+
+  /// Invite a friend to this room. Optimistically marks them "Sent"; if the
+  /// server rejects (offline/left), an error event arrives and we un-mark.
+  void inviteFriend(String friendId) {
+    if (invitedFriendIds.contains(friendId)) return;
+    invitedFriendIds.add(friendId);
+    _conn?.send({'action': 'invite_friend', 'friend_id': friendId});
+    _notify();
+  }
+
+  bool hasInvited(String friendId) => invitedFriendIds.contains(friendId);
 
   void submitVote(bool accept) {
     if (myVoteCast) return;
@@ -251,6 +271,9 @@ class GameRoomState extends ChangeNotifier {
       case FriendRequestPushed():
         lastFriendRequest = event;
         friendRequestsSeen++;
+      case RoomInvitePushed():
+        lastRoomInvite = event;
+        roomInvitesSeen++;
       case UnknownEvent():
         break; // forward-compatibility: ignore what we don't know
     }

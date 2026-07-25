@@ -228,6 +228,35 @@ void main() {
     expect(left, inInclusiveRange(10, 12)); // rejoin resumes mid-countdown
   });
 
+  test('inviteFriend sends the action and marks the friend as invited',
+      () async {
+    await emitLobbySnapshot();
+    expect(room.hasInvited('bob'), isFalse);
+
+    room.inviteFriend('bob');
+    expect(conn.sent.last,
+        {'action': 'invite_friend', 'friend_id': 'bob'});
+    expect(room.hasInvited('bob'), isTrue);
+
+    // Idempotent: a second tap doesn't re-send.
+    room.inviteFriend('bob');
+    expect(conn.sent.where((m) => m['action'] == 'invite_friend').length, 1);
+  });
+
+  test('room_invite_received relays through the counter', () async {
+    await emitLobbySnapshot();
+    expect(room.roomInvitesSeen, 0);
+    await emit({
+      'event': 'room_invite_received',
+      'room_code': '999888',
+      'sender_id': 'carol',
+      'sender_name': 'Carol',
+    });
+    expect(room.roomInvitesSeen, 1);
+    expect(room.lastRoomInvite!.roomCode, '999888');
+    expect(room.lastRoomInvite!.senderName, 'Carol');
+  });
+
   test('server rule errors bump the counter and unlock voting', () async {
     await emitLobbySnapshot();
     room.submitVote(true);

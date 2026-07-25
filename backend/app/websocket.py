@@ -33,6 +33,7 @@ from . import presence
 from .auth import get_current_player, resolve_player_by_token
 from .countries import difficulty_of
 from .db import Player, get_db, _SessionLocal  # noqa: PLC2701 - session factory
+from .friends import are_friends
 from .llm_judge import llm_fact_evaluator
 from .rooms import Room, RoomError, RoomManager, RoomPhase
 
@@ -263,6 +264,10 @@ async def game_socket(websocket: WebSocket, room_code: str) -> None:
                     )
                     await _broadcast(room, events)
                     await _maybe_persist(room)
+                elif action == "invite_friend":
+                    await _handle_invite(
+                        room, player, str(message.get("friend_id", "")), websocket
+                    )
                 else:
                     raise RoomError(f"Unknown action: {action!r}")
             except RoomError as exc:
@@ -278,6 +283,41 @@ async def game_socket(websocket: WebSocket, room_code: str) -> None:
         await _broadcast(room, events)
         await _maybe_persist(room)
         await manager.remove_if_abandoned(room)
+
+
+def _check_friendship(sender_id: str, friend_id: str) -> bool:
+    db = _SessionLocal()
+    try:
+        return are_friends(db, sender_id, friend_id)
+    finally:
+        db.close()
+
+
+async def _handle_invite(
+    room: Room, sender: Player, friend_id: str, socket: Any
+) -> None:
+    """Invite a friend to THIS room. Verifies friendship + online status;
+    pushes `room_invite_received` to the friend. Errors go only to the
+    sender's socket (never crashes the room)."""
+    async def deny(detail: str) -> None:
+        await socket.send_json({"event": "error", "detail": detail})
+
+    if not friend_id or friend_id == sender.id:
+        return await deny("مش قادر أبعت الدعوة دي.")
+    existing = room.players.get(friend_id)
+    if existing is not None and existing.connected:
+        return await deny("صاحبك معاك في الأوضة بالفعل 🙂")
+    if not await run_in_threadpool(_check_friendship, sender.id, friend_id):
+        return await deny("لازم تكونوا أصحاب الأول عشان تدعوه.")
+    if not presence.is_online(friend_id):
+        return await deny("صاحبك مش أونلاين دلوقتي.")
+
+    await presence.notify(friend_id, {
+        "event": "room_invite_received",
+        "room_code": room.code,
+        "sender_id": sender.id,
+        "sender_name": sender.name,
+    })
 
 
 async def _maybe_persist(room: Room) -> None:
