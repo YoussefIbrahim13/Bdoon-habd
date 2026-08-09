@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/fx.dart';
 import '../widgets/nova_components.dart';
 import '../widgets/rotating_globe.dart';
 import 'home_screen.dart';
@@ -43,18 +44,18 @@ class _GameModeScreenState extends State<GameModeScreen>
 
   void _openOffline() {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      NovaPageRoute(builder: (_) => const HomeScreen()),
     );
   }
 
   void _onOnlineTap() {
     if (context.read<AuthService>().isSignedIn) {
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const OnlineHubScreen()),
+        NovaPageRoute(builder: (_) => const OnlineHubScreen()),
       );
     } else {
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const SignInScreen()),
+        NovaPageRoute(builder: (_) => const SignInScreen()),
       );
     }
   }

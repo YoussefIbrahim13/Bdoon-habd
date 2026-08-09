@@ -185,12 +185,6 @@ class _CountdownRingState extends State<CountdownRing>
 
   @override
   Widget build(BuildContext context) {
-    final Color accent = widget.paused
-        ? AppColors.textSecondary
-        : (widget.warn ? AppColors.ruby : AppColors.electricBlue);
-    final Color numberColor = widget.paused
-        ? AppColors.textSecondary
-        : (widget.warn ? AppColors.ruby : Colors.white);
     final progress = (widget.secondsLeft / GameState.turnDuration).clamp(
       0.0,
       1.0,
@@ -212,7 +206,30 @@ class _CountdownRingState extends State<CountdownRing>
                 ? 0.0
                 : (_shouldPulse ? 0.5 + 0.5 * t : 0.55);
             final scale = _shouldPulse ? 1.0 + 0.10 * t : 1.0;
-            return CustomPaint(
+            // Nervous jitter in the critical final seconds: a fast sine
+            // riding the pulse controller, ±1.6px.
+            final jitter = widget.danger && !widget.paused
+                ? math.sin(_pulse.value * math.pi * 8) * 1.6
+                : 0.0;
+            return Transform.translate(
+              offset: Offset(jitter, 0),
+              child: _buildRing(animatedProgress, t, glow, scale),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRing(
+      double animatedProgress, double t, double glow, double scale) {
+    final Color accent = widget.paused
+        ? AppColors.textSecondary
+        : (widget.warn ? AppColors.ruby : AppColors.electricBlue);
+    final Color numberColor = widget.paused
+        ? AppColors.textSecondary
+        : (widget.warn ? AppColors.ruby : Colors.white);
+    return CustomPaint(
               painter: _RingPainter(
                 progress: animatedProgress,
                 color: accent,
@@ -232,10 +249,6 @@ class _CountdownRingState extends State<CountdownRing>
                 ),
               ),
             );
-          },
-        ),
-      ),
-    );
   }
 }
 

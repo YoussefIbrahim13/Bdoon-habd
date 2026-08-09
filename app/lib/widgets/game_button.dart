@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../theme/app_theme.dart';
 
@@ -20,6 +21,11 @@ class GameButton extends StatefulWidget {
   final double height;
   final TextStyle? textStyle;
 
+  /// Haptic weight on press: light for navigation/secondary actions (the
+  /// default), medium for consequential game actions (verdicts, votes,
+  /// submitting a fact).
+  final bool mediumHaptic;
+
   const GameButton({
     super.key,
     required this.label,
@@ -31,6 +37,7 @@ class GameButton extends StatefulWidget {
     this.glowColor,
     this.height = 56,
     this.textStyle,
+    this.mediumHaptic = false,
   });
 
   @override
@@ -112,13 +119,23 @@ class _GameButtonState extends State<GameButton> {
     }
 
     return Listener(
-      onPointerDown: _enabled ? (_) => setState(() => _pressed = true) : null,
+      onPointerDown: _enabled
+          ? (_) {
+              setState(() => _pressed = true);
+              // Tactile tick the instant the finger lands (fire-and-forget).
+              widget.mediumHaptic
+                  ? HapticFeedback.mediumImpact()
+                  : HapticFeedback.lightImpact();
+            }
+          : null,
       onPointerUp: _enabled ? (_) => setState(() => _pressed = false) : null,
       onPointerCancel: _enabled ? (_) => setState(() => _pressed = false) : null,
       child: AnimatedScale(
-        scale: _pressed ? 0.95 : 1.0,
-        duration: const Duration(milliseconds: 110),
-        curve: Curves.easeOut,
+        scale: _pressed ? 0.94 : 1.0,
+        // Springy: easeOutBack overshoots slightly on release, so the button
+        // "pops" back instead of gliding.
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutBack,
         child: AnimatedOpacity(
           opacity: _enabled ? 1 : 0.45,
           duration: const Duration(milliseconds: 200),

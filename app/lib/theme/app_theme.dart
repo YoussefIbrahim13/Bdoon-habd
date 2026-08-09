@@ -48,10 +48,27 @@ abstract final class AppColors {
 
 abstract final class AppGradients {
   /// Brand / primary actions / active player — NovaPay violet.
+  ///
+  /// For FILLED SURFACES only (buttons, capsules, the segment glider). Do not
+  /// use it to fill TEXT — see [wordmark].
   static const turn = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
     colors: [AppColors.accentGlow, AppColors.displayViolet],
+  );
+
+  /// Violet fill for TEXT — the "بدون هبد!" wordmark and hero titles.
+  ///
+  /// Deliberately not [turn]. That gradient starts at [AppColors.accentGlow]
+  /// (#9B7BFF), a pale lavender: across a large filled surface it reads as a
+  /// soft glow, but spread over the thin antialiased strokes of the Arabic
+  /// wordmark the light end fringes the glyph edges and reads as a white
+  /// highlight. These stops are fully-saturated violet end to end, so no part
+  /// of a headline can render as white, grey, or washed-out lavender.
+  static const wordmark = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [AppColors.primaryViolet, AppColors.displayViolet],
   );
 
   /// Smart Judge: verdict "true".
@@ -113,14 +130,18 @@ abstract final class AppShadows {
 /// default instance).
 abstract final class AppText {
   /// Massive NovaPay display headline. Cairo at its heaviest (w900) so it
-  /// renders Arabic AND Latin (Anton/Archivo Black have no Arabic glyphs),
-  /// with tight line-height and negative tracking for that condensed,
-  /// dominating-negative-space look.
+  /// renders Arabic AND Latin (Anton/Archivo Black have no Arabic glyphs).
+  ///
+  /// Arabic constraints on the "condensed" look: line-height below ~1.1
+  /// CLIPS Arabic glyphs (ascenders/descenders overflow the line box), and
+  /// negative tracking breaks the connected script's ligatures — so the
+  /// defaults are Arabic-safe. For Latin-only headlines, pass tighter
+  /// values explicitly (e.g. height: 0.92, spacing: -1.5).
   static TextStyle display({
     double size = 48,
     Color color = AppColors.textPrimary,
-    double height = 0.92,
-    double spacing = -1.5,
+    double height = 1.15,
+    double spacing = 0,
   }) =>
       TextStyle(
         fontFamily: 'Cairo',

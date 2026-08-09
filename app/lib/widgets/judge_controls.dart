@@ -57,6 +57,7 @@ class JudgeControls extends StatelessWidget {
                   height: 60,
                   gradient: AppGradients.falsehood,
                   glowColor: AppColors.rubyDeep,
+                  mediumHaptic: true, // a verdict deserves weight
                   onPressed: onRuleFalse,
                 ),
               ),
@@ -68,6 +69,7 @@ class JudgeControls extends StatelessWidget {
                   height: 60,
                   gradient: AppGradients.truth,
                   glowColor: AppColors.emeraldDeep,
+                  mediumHaptic: true,
                   onPressed: onAcceptFact,
                 ),
               ),

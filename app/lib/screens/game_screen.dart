@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -9,9 +10,11 @@ import '../state/game_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/countdown_ring.dart';
 import '../widgets/country_card.dart';
+import '../widgets/fx.dart';
 import '../widgets/game_button.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/judge_controls.dart';
+import '../widgets/nova_components.dart';
 import '../widgets/scoreboard.dart';
 import '../widgets/smart_judge_sheet.dart';
 import '../widgets/tutorial_overlay.dart';
@@ -39,6 +42,12 @@ class _GameScreenState extends State<GameScreen> {
   late final GameState _game;
   int _seenEliminations = 0;
   int _seenRounds = 0;
+  GamePhase? _lastPhase;
+
+  // One-shot FX triggers: confetti on a round win, shake+flash on a knockout.
+  int _confettiTrigger = 0;
+  int _shakeTrigger = 0;
+  int _flashTrigger = 0;
 
   // --- First-time coach-marks tour ---
   bool _tutorialActive = false;
@@ -146,12 +155,24 @@ class _GameScreenState extends State<GameScreen> {
     } else if (someoneOut) {
       _announceElimination();
     }
+    // Final score reveal: one heavy thump + celebration burst.
+    if (_game.phase != _lastPhase) {
+      if (_game.phase == GamePhase.matchOver) {
+        HapticFeedback.heavyImpact();
+      }
+      _lastPhase = _game.phase;
+    }
   }
 
   void _announceElimination() {
     if (!mounted || _game.phase != GamePhase.playing) return;
     final out = _game.lastEliminated;
     if (out == null) return;
+    // هبدة! — jolt the board.
+    setState(() {
+      _shakeTrigger++;
+      _flashTrigger++;
+    });
     final timedOut = _game.lastRoundEndReason == RoundEndReason.timeout;
     final msg = timedOut
         ? '⏰ انتهى وقت ${_game.playerNames[out]} — خرج من الجولة!'
@@ -164,6 +185,9 @@ class _GameScreenState extends State<GameScreen> {
     if (!mounted || _game.phase != GamePhase.playing) return;
     final winner = _game.lastRoundWinner;
     if (winner == null) return;
+    // صح! — emerald celebration.
+    setState(() => _confettiTrigger++);
+    HapticFeedback.mediumImpact();
     _showSnack(
       '🏆 ${_game.playerNames[winner]} آخر الصامدين — نقطة! جولة جديدة',
     );
@@ -404,7 +428,7 @@ class _GameScreenState extends State<GameScreen> {
       _game.resetGame();
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        NovaPageRoute(builder: (_) => const HomeScreen()),
         (_) => false,
       );
     } else if (resumeAfter) {
@@ -430,7 +454,10 @@ class _GameScreenState extends State<GameScreen> {
         children: [
           const AmbientBackground(),
           SafeArea(
-            child: Padding(
+            // Shake the whole board on a knockout.
+            child: ShakeWrapper(
+              trigger: _shakeTrigger,
+              child: Padding(
               padding: const EdgeInsets.fromLTRB(18, 8, 18, 16),
               child: Column(
                 children: [
@@ -491,8 +518,12 @@ class _GameScreenState extends State<GameScreen> {
                   ),
                 ],
               ),
+              ),
             ),
           ),
+          // One-shot FX layers: idle they render nothing at all.
+          Positioned.fill(child: FlashOverlay(trigger: _flashTrigger)),
+          Positioned.fill(child: ConfettiLayer(trigger: _confettiTrigger)),
           // First-time guided tour, floating over the frozen board.
           if (_tutorialActive)
             Positioned.fill(
@@ -650,17 +681,11 @@ class _MatchOverView extends StatelessWidget {
                   children: [
                     const Text('🏆', style: TextStyle(fontSize: 84)),
                     const SizedBox(height: 20),
-                    ShaderMask(
-                      shaderCallback: (r) => AppGradients.turn.createShader(r),
-                      child: Text(
-                        game.playerNames[winner],
-                        textAlign: TextAlign.center,
-                        style: AppText.ui(
-                          size: 32,
-                          weight: FontWeight.w800,
-                          color: Colors.white,
-                        ),
-                      ),
+                    GradientText(
+                      game.playerNames[winner],
+                      gradient: AppGradients.wordmark,
+                      textAlign: TextAlign.center,
+                      style: AppText.ui(size: 32, weight: FontWeight.w800),
                     ),
                     const SizedBox(height: 6),
                     Text(

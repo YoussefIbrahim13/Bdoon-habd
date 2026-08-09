@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
+import '../widgets/nova_components.dart';
 import '../widgets/glass_container.dart';
 import 'game_mode_screen.dart';
 
@@ -125,16 +126,10 @@ class _SplashViewState extends State<SplashView> with TickerProviderStateMixin {
                     opacity: _titleReveal.value,
                     child: Transform.translate(
                       offset: Offset(0, 26 * (1 - _titleReveal.value)),
-                      child: ShaderMask(
-                        shaderCallback: (r) => AppGradients.turn.createShader(r),
-                        child: Text(
-                          'بدون هبد!',
-                          style: AppText.ui(
-                            size: 42,
-                            weight: FontWeight.w800,
-                            color: Colors.white,
-                          ),
-                        ),
+                      child: GradientText(
+                        'بدون هبد!',
+                        gradient: AppGradients.wordmark,
+                        style: AppText.ui(size: 42, weight: FontWeight.w800),
                       ),
                     ),
                   ),

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../state/game_state.dart';
 import '../theme/app_theme.dart';
+import 'fx.dart';
 import 'pulse_on_change.dart';
 
 /// Scoreboard for 2–4 players: a target chip above a two-column [Wrap] of
@@ -121,10 +122,11 @@ class _PlayerScoreCard extends StatelessWidget {
         _PassTicket(spent: passSpent, accent: accent),
       ],
     );
+    // Pulse on change + roll the digits instead of jumping.
     final scoreText = PulseOnChange(
       value: score,
-      child: Text(
-        '$score',
+      child: AnimatedCount(
+        value: score,
         style: AppText.number(
           size: compact ? 26 : 46,
           weight: FontWeight.w800,

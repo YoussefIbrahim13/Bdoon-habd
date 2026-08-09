@@ -7,6 +7,7 @@ import '../models/country.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import 'game_button.dart';
+import 'nova_components.dart';
 
 /// "Ask the Smart Judge" panel: the human judge types the disputed claim,
 /// the backend checks it, and the verdict is shown as ADVISORY input only.
@@ -314,16 +315,12 @@ class _ResultCard extends StatelessWidget {
                   child: Icon(icon, color: Colors.white, size: 22),
                 ),
                 const SizedBox(width: 12),
-                ShaderMask(
-                  shaderCallback: (r) => gradient.createShader(r),
-                  child: Text(
-                    title,
-                    style: AppText.ui(
-                      size: 22,
-                      weight: FontWeight.w800,
-                      color: Colors.white,
-                    ),
-                  ),
+                GradientText(
+                  title,
+                  // Verdict gradient (truth / falsehood / uncertain) — the
+                  // semantic gameplay colors, not the brand violet.
+                  gradient: gradient,
+                  style: AppText.ui(size: 22, weight: FontWeight.w800),
                 ),
               ],
             ),

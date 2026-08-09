@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../models/country.dart';
@@ -7,7 +8,9 @@ import '../state/game_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/game_button.dart';
+import '../widgets/fx.dart';
 import '../widgets/glass_container.dart';
+import '../widgets/nova_components.dart';
 import 'game_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -104,13 +107,17 @@ class _HomeScreenState extends State<HomeScreen> {
           difficulty: _difficulty,
         );
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const GameScreen()),
+      NovaPageRoute(builder: (_) => const GameScreen()),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Explicit rather than inherited from the theme: during a route
+      // transition this screen must be opaque dark violet on frame zero,
+      // with nothing showing through from the route underneath.
+      backgroundColor: AppColors.bg,
       body: Stack(
         children: [
           const AmbientBackground(),
@@ -147,16 +154,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       const SizedBox(height: 22),
-                      ShaderMask(
-                        shaderCallback: (r) => AppGradients.turn.createShader(r),
-                        child: Text(
-                          'بدون هبد!',
-                          textAlign: TextAlign.center,
-                          style: AppText.ui(
-                              size: 40, weight: FontWeight.w800, color: Colors.white),
-                        ),
+                      const DisplayHeadline(
+                        'بدون هبد!',
+                        size: 44,
+                        gradient: true,
                       ),
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 6),
                       Text(
                         'لعبة معلومات البلاد — من ٢ إلى ٤ لاعبين وحكم واحد',
                         textAlign: TextAlign.center,
@@ -184,18 +187,26 @@ class _HomeScreenState extends State<HomeScreen> {
                               duration: const Duration(milliseconds: 340),
                               curve: Curves.fastOutSlowIn,
                               alignment: Alignment.topCenter,
-                              child: Column(
-                                children: [
-                                  for (var i = 0; i < _playerCount; i++) ...[
-                                    _PlayerField(
-                                      label: _fieldLabels[i],
-                                      hint: _defaultNames[i],
-                                      controller: _nameControllers[i],
-                                      accent: AppColors.playerAccents[i],
-                                    ),
-                                    const SizedBox(height: 12),
+                              // AnimatedSwitcher cross-fades the field block
+                              // as seats 3/4 appear/disappear, while the
+                              // outer AnimatedSize glides the height.
+                              child: AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 260),
+                                switchInCurve: Curves.easeOutCubic,
+                                child: Column(
+                                  key: ValueKey(_playerCount),
+                                  children: [
+                                    for (var i = 0; i < _playerCount; i++) ...[
+                                      _PlayerField(
+                                        label: _fieldLabels[i],
+                                        hint: _defaultNames[i],
+                                        controller: _nameControllers[i],
+                                        accent: AppColors.playerAccents[i],
+                                      ),
+                                      const SizedBox(height: 12),
+                                    ],
                                   ],
-                                ],
+                                ),
                               ),
                             ),
                             // Generous breathing room before the target row.
@@ -244,18 +255,30 @@ class _HomeScreenState extends State<HomeScreen> {
                           onPressed: _loadCountries,
                         ),
                       ] else
-                        GameButton(
-                          label: 'ابدأ اللعب',
+                        // Prominent fully-rounded CTA with the violet glow.
+                        PillButton(
+                          label: 'ابدأ اللعبة',
                           icon: Icons.sports_esports_rounded,
-                          height: 62,
-                          gradient: AppGradients.turn,
-                          glowColor: AppColors.neonPurple,
-                          textStyle: AppText.ui(size: 18, weight: FontWeight.w800),
+                          height: 60,
+                          mediumHaptic: true,
                           onPressed: _start,
                         ),
                     ],
                   ),
                 ),
+              ),
+            ),
+          ),
+          // Glass back button to the mode-selection gateway. Last in the
+          // Stack so it paints (and hit-tests) above the scroll layer;
+          // directional positioning keeps it in the correct corner under RTL.
+          const PositionedDirectional(
+            top: 0,
+            start: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(14, 10, 14, 0),
+                child: GlassBackButton(),
               ),
             ),
           ),
@@ -267,9 +290,14 @@ class _HomeScreenState extends State<HomeScreen> {
   static const _targetOptions = [1, 3, 5, 7, 10];
 }
 
-/// The setup card: deeper frosted glass wrapped in a fine blue→purple
-/// gradient ring, floated on soft black + faint neon shadows so it lifts
-/// cleanly off the ambient background.
+/// The setup card: a solid dark-violet glass surface wrapped in a fine
+/// blue→purple gradient ring, floated on soft black + faint neon shadows so
+/// it lifts cleanly off the ambient background.
+///
+/// This is the largest surface on the screen and it mounts on the same frame
+/// as the [NovaPageRoute] transition, so it is deliberately cheap: no
+/// backdrop blur, no entrance sheen, and a [RepaintBoundary] so its two soft
+/// shadows rasterize once instead of on every frame of the push animation.
 class _SetupCard extends StatelessWidget {
   final Widget child;
 
@@ -277,33 +305,37 @@ class _SetupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadii.card + 1.4),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppColors.electricBlue.withValues(alpha: .45),
-            AppColors.stroke,
-            AppColors.neonPurple.withValues(alpha: .45),
+    return RepaintBoundary(
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadii.card + 1.4),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppColors.electricBlue.withValues(alpha: .45),
+              AppColors.stroke,
+              AppColors.neonPurple.withValues(alpha: .45),
+            ],
+          ),
+          boxShadow: [
+            ...AppShadows.soft,
+            BoxShadow(
+              color: AppColors.neonPurple.withValues(alpha: .10),
+              blurRadius: 44,
+              offset: const Offset(0, 16),
+            ),
           ],
         ),
-        boxShadow: [
-          ...AppShadows.soft,
-          BoxShadow(
-            color: AppColors.neonPurple.withValues(alpha: .10),
-            blurRadius: 44,
-            offset: const Offset(0, 16),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(1.4),
-      child: GlassContainer(
-        blur: 26,
-        radius: AppRadii.card,
-        padding: const EdgeInsets.fromLTRB(20, 22, 20, 22),
-        child: child,
+        padding: const EdgeInsets.all(1.4),
+        // GlassCard on its fast path: opaque dark base + a static violet tint
+        // gradient. No BackdropFilter — over this near-uniform background the
+        // blur was visually a no-op that cost a saveLayer every frame.
+        child: GlassCard(
+          radius: AppRadii.card,
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 22),
+          child: child,
+        ),
       ),
     );
   }
@@ -416,26 +448,35 @@ class _SlidingSegments extends StatelessWidget {
                     Expanded(
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
-                        onTap: () => onSelected(i),
+                        onTap: () {
+                          HapticFeedback.lightImpact(); // toggle tick
+                          onSelected(i);
+                        },
                         child: Center(
-                          child: AnimatedDefaultTextStyle(
-                            duration: const Duration(milliseconds: 220),
-                            style: arabicLabels
-                                ? AppText.ui(
-                                    size: 13,
-                                    weight: FontWeight.w800,
-                                    color: i == selectedIndex
-                                        ? Colors.white
-                                        : AppColors.textSecondary,
-                                  )
-                                : AppText.number(
-                                    size: 17,
-                                    weight: FontWeight.w700,
-                                    color: i == selectedIndex
-                                        ? Colors.white
-                                        : AppColors.textSecondary,
-                                  ),
-                            child: Text(labels[i]),
+                          // Springy pop on the newly-selected label.
+                          child: AnimatedScale(
+                            scale: i == selectedIndex ? 1.08 : 1.0,
+                            duration: const Duration(milliseconds: 260),
+                            curve: Curves.easeOutBack,
+                            child: AnimatedDefaultTextStyle(
+                              duration: const Duration(milliseconds: 220),
+                              style: arabicLabels
+                                  ? AppText.ui(
+                                      size: 13,
+                                      weight: FontWeight.w800,
+                                      color: i == selectedIndex
+                                          ? Colors.white
+                                          : AppColors.textSecondary,
+                                    )
+                                  : AppText.number(
+                                      size: 17,
+                                      weight: FontWeight.w700,
+                                      color: i == selectedIndex
+                                          ? Colors.white
+                                          : AppColors.textSecondary,
+                                    ),
+                              child: Text(labels[i]),
+                            ),
                           ),
                         ),
                       ),

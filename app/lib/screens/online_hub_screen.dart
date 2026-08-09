@@ -7,8 +7,10 @@ import '../services/game_socket_service.dart';
 import '../state/friendship_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/friend_widgets.dart';
+import '../widgets/fx.dart';
 import '../widgets/game_button.dart';
 import '../widgets/glass_container.dart';
+import '../widgets/nova_components.dart';
 import 'game_room_screen.dart';
 
 /// Online mode hub: create a room (REST → then socket) or join a friend's
@@ -68,7 +70,7 @@ class _OnlineHubScreenState extends State<OnlineHubScreen> {
 
   void _openRoom(String code) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => GameRoomScreen(roomCode: code)),
+      NovaPageRoute(builder: (_) => GameRoomScreen(roomCode: code)),
     );
   }
 
@@ -97,6 +99,12 @@ class _OnlineHubScreenState extends State<OnlineHubScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        leadingWidth: 64,
+        leading: const Padding(
+          padding: EdgeInsetsDirectional.only(start: 12),
+          child: Center(child: GlassBackButton()),
+        ),
         title: Text('لعب أونلاين',
             style: AppText.ui(size: 18, weight: FontWeight.w800)),
         actions: const [FriendRequestsBell(), SizedBox(width: 4)],
@@ -127,7 +135,7 @@ class _OnlineHubScreenState extends State<OnlineHubScreen> {
                       ),
                       const SizedBox(height: 28),
                       // --- Create room -------------------------------------
-                      GlassContainer(
+                      GlassCard(
                         padding: const EdgeInsets.all(20),
                         child: Column(
                           children: [
@@ -155,6 +163,7 @@ class _OnlineHubScreenState extends State<OnlineHubScreen> {
                                   : null,
                               gradient: AppGradients.turn,
                               glowColor: AppColors.neonPurple,
+                              mediumHaptic: true,
                               onPressed: _creating ? null : _createRoom,
                             ),
                           ],
@@ -162,7 +171,7 @@ class _OnlineHubScreenState extends State<OnlineHubScreen> {
                       ),
                       const SizedBox(height: 18),
                       // --- Join room ---------------------------------------
-                      GlassContainer(
+                      GlassCard(
                         padding: const EdgeInsets.all(20),
                         child: Column(
                           children: [
@@ -175,36 +184,16 @@ class _OnlineHubScreenState extends State<OnlineHubScreen> {
                                 style: AppText.ui(
                                     size: 16, weight: FontWeight.w800)),
                             const SizedBox(height: 14),
-                            TextField(
+                            _CodeField(
                               controller: _codeController,
-                              keyboardType: TextInputType.number,
-                              textAlign: TextAlign.center,
-                              maxLength: 6,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly,
-                              ],
-                              style: AppText.number(
-                                  size: 26,
-                                  weight: FontWeight.w800,
-                                  spacing: 8),
-                              decoration: InputDecoration(
-                                counterText: '',
-                                hintText: '000000',
-                                hintStyle: AppText.number(
-                                  size: 26,
-                                  weight: FontWeight.w800,
-                                  color: AppColors.textSecondary
-                                      .withValues(alpha: .35),
-                                  spacing: 8,
-                                ),
-                              ),
-                              onSubmitted: (_) => _joinRoom(),
+                              onSubmitted: _joinRoom,
                             ),
                             const SizedBox(height: 14),
                             GameButton(
                               label: 'ادخل الأوضة',
                               icon: Icons.login_rounded,
                               borderGradient: AppGradients.turn,
+                              mediumHaptic: true,
                               onPressed: _joinRoom,
                             ),
                           ],
@@ -217,6 +206,85 @@ class _OnlineHubScreenState extends State<OnlineHubScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Oversized 6-digit room-code input with a violet glow that blooms while
+/// focused — the numeric display treatment for codes.
+class _CodeField extends StatefulWidget {
+  final TextEditingController controller;
+  final VoidCallback onSubmitted;
+
+  const _CodeField({required this.controller, required this.onSubmitted});
+
+  @override
+  State<_CodeField> createState() => _CodeFieldState();
+}
+
+class _CodeFieldState extends State<_CodeField> {
+  final FocusNode _focus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final focused = _focus.hasFocus;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOut,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadii.field),
+        boxShadow: focused
+            ? [
+                BoxShadow(
+                  color: AppColors.primaryViolet.withValues(alpha: .32),
+                  blurRadius: 18,
+                  spreadRadius: 1,
+                ),
+              ]
+            : const [],
+      ),
+      child: TextField(
+        controller: widget.controller,
+        focusNode: _focus,
+        keyboardType: TextInputType.number,
+        textAlign: TextAlign.center,
+        maxLength: 6,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        style: AppText.number(size: 26, weight: FontWeight.w800, spacing: 8),
+        decoration: InputDecoration(
+          counterText: '',
+          hintText: '000000',
+          hintStyle: AppText.number(
+            size: 26,
+            weight: FontWeight.w800,
+            color: AppColors.textSecondary.withValues(alpha: .35),
+            spacing: 8,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppRadii.field),
+            borderSide: BorderSide(
+                color: AppColors.primaryViolet.withValues(alpha: .28)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppRadii.field),
+            borderSide:
+                const BorderSide(color: AppColors.primaryViolet, width: 1.6),
+          ),
+        ),
+        onSubmitted: (_) => widget.onSubmitted(),
       ),
     );
   }

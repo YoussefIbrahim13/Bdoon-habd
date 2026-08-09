@@ -7,6 +7,7 @@ import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/glass_container.dart';
+import '../widgets/nova_components.dart';
 
 /// Google Sign-In gateway for the online mode.
 ///
@@ -78,17 +79,14 @@ class _SignInScreenState extends State<SignInScreen> {
                     children: [
                       const AppLogo(size: 120, animate: true),
                       const SizedBox(height: 24),
-                      ShaderMask(
-                        shaderCallback: (r) => AppGradients.turn.createShader(r),
-                        child: Text(
-                          'سجل دخولك لتحدي الأونلاين ⚡',
-                          textAlign: TextAlign.center,
-                          style: AppText.ui(
-                            size: 24,
-                            weight: FontWeight.w800,
-                            color: Colors.white,
-                            height: 1.4,
-                          ),
+                      GradientText(
+                        'سجل دخولك لتحدي الأونلاين ⚡',
+                        gradient: AppGradients.wordmark,
+                        textAlign: TextAlign.center,
+                        style: AppText.ui(
+                          size: 24,
+                          weight: FontWeight.w800,
+                          height: 1.4,
                         ),
                       ),
                       const SizedBox(height: 10),

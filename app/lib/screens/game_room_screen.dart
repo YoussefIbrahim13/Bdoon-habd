@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../models/game_events.dart';
@@ -11,6 +12,7 @@ import '../state/game_room_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/country_card.dart';
 import '../widgets/friend_widgets.dart';
+import '../widgets/fx.dart';
 import '../widgets/game_button.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/nova_components.dart';
@@ -55,6 +57,12 @@ class _GameRoomViewState extends State<_GameRoomView> {
   int _seenFriendReqs = 0;
   int _seenInvites = 0;
   RoomInvitePushed? _pendingInvite;
+  OnlinePhase? _lastPhase;
+
+  // One-shot FX triggers (bump = play): confetti on صح, shake+flash on هبد.
+  int _confettiTrigger = 0;
+  int _shakeTrigger = 0;
+  int _flashTrigger = 0;
 
   @override
   void initState() {
@@ -84,6 +92,11 @@ class _GameRoomViewState extends State<_GameRoomView> {
     if (_room.timeoutsSeen != _seenTimeouts) {
       _seenTimeouts = _room.timeoutsSeen;
       final name = _room.playerById(_room.lastTimedOutPlayerId)?.name ?? '';
+      HapticFeedback.heavyImpact(); // time's up — unmistakable jolt
+      setState(() {
+        _shakeTrigger++;
+        _flashTrigger++;
+      });
       _snack('⏰ خلص وقت $name — الجولة راحت عليه!', AppColors.ruby);
     }
     // A friend request rode the game socket — hand it to the friends state so
@@ -117,6 +130,16 @@ class _GameRoomViewState extends State<_GameRoomView> {
       final r = _room.lastRoundResult;
       if (r != null) {
         final name = _room.playerById(r.playerId)?.name ?? '';
+        // Gamified reveal: confetti for صح, shake + ruby flash for هبد.
+        setState(() {
+          if (r.awarded) {
+            _confettiTrigger++;
+          } else {
+            _shakeTrigger++;
+            _flashTrigger++;
+          }
+        });
+        HapticFeedback.mediumImpact();
         _snack(
           r.awarded
               ? '🏆 نقطة لـ $name! (صح ${r.trueVotes} × هبد ${r.falseVotes})'
@@ -124,6 +147,14 @@ class _GameRoomViewState extends State<_GameRoomView> {
           r.awarded ? AppColors.emerald : AppColors.ruby,
         );
       }
+    }
+    // Phase-edge effects: heavy thump + celebration on the final podium.
+    if (_room.phase != _lastPhase) {
+      if (_room.phase == OnlinePhase.gameOver) {
+        HapticFeedback.heavyImpact();
+        setState(() => _confettiTrigger++);
+      }
+      _lastPhase = _room.phase;
     }
   }
 
@@ -155,14 +186,24 @@ class _GameRoomViewState extends State<_GameRoomView> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        leadingWidth: 64,
+        leading: const Padding(
+          padding: EdgeInsetsDirectional.only(start: 12),
+          child: Center(child: GlassBackButton()),
+        ),
         title: Text('أوضة $code',
             style: AppText.number(size: 17, weight: FontWeight.w700)),
+        actions: const [FriendRequestsBell(), SizedBox(width: 4)],
       ),
       body: Stack(
         children: [
           const AmbientBackground(),
           SafeArea(
-            child: AnimatedSwitcher(
+            // Shake the whole board on a busted round / timeout.
+            child: ShakeWrapper(
+              trigger: _shakeTrigger,
+              child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 320),
               switchInCurve: Curves.easeOutCubic,
               child: switch (phase) {
@@ -182,8 +223,12 @@ class _GameRoomViewState extends State<_GameRoomView> {
                 OnlinePhase.disconnected =>
                   const _DisconnectedView(key: ValueKey('gone')),
               },
+              ),
             ),
           ),
+          // One-shot FX layers: idle they render nothing at all.
+          Positioned.fill(child: FlashOverlay(trigger: _flashTrigger)),
+          Positioned.fill(child: ConfettiLayer(trigger: _confettiTrigger)),
           // Incoming room-invite banner (Join / Decline), floats at the top.
           if (_pendingInvite != null)
             Positioned(
@@ -209,7 +254,7 @@ class _GameRoomViewState extends State<_GameRoomView> {
     // Replace this room with the invited one (existing join flow handles a
     // full/started room by landing on the disconnected view with the reason).
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => GameRoomScreen(roomCode: code)),
+      NovaPageRoute(builder: (_) => GameRoomScreen(roomCode: code)),
     );
   }
 }
@@ -284,7 +329,8 @@ class _PlayersStrip extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 7),
-                  Text('${p.score}',
+                  AnimatedCount(
+                      value: p.score,
                       style: AppText.number(
                           size: 15,
                           weight: FontWeight.w800,
@@ -339,60 +385,31 @@ class _LobbyView extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // The shareable room code, hero-sized.
-              GradientBorderCard(
-                gradient: AppGradients.turn,
-                padding: const EdgeInsets.symmetric(vertical: 18),
-                child: Column(
-                  children: [
-                    Text('كود الأوضة',
-                        style: AppText.ui(
-                            size: 12.5, color: AppColors.textSecondary)),
-                    const SizedBox(height: 6),
-                    Text(room.roomCode,
-                        style: AppText.number(
-                            size: 44, weight: FontWeight.w800, spacing: 10)),
-                    const SizedBox(height: 4),
-                    Text('ابعته لأصحابك وخليهم يدخلوا',
-                        style: AppText.ui(
-                            size: 12, color: AppColors.textSecondary)),
-                  ],
-                ),
-              ),
+              // The shareable room code — tap to copy, with haptic + nudge.
+              _CopyableRoomCode(code: room.roomCode),
               const SizedBox(height: 16),
               const _LobbySettings(),
               const SizedBox(height: 16),
-              GlassContainer(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('اللاعيبة (${room.players.length})',
-                        style:
-                            AppText.ui(size: 14, weight: FontWeight.w800)),
-                    const SizedBox(height: 12),
-                    for (final p in room.players)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        child: Row(
-                          children: [
-                            _Avatar(player: p, size: 34),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(p.name,
-                                  style: AppText.ui(
-                                      size: 14.5, weight: FontWeight.w700)),
-                            ),
-                            if (p.id == room.hostId)
-                              Text('👑',
-                                  style: const TextStyle(fontSize: 16)),
-                          ],
-                        ),
-                      ),
+              // Player slots: each seat its own glass card with the seat's
+              // identity glow; open seats pulse "بانتظار لاعب...".
+              Column(
+                children: [
+                  for (final (i, p) in room.players.indexed) ...[
+                    _PlayerSlot(
+                      player: p,
+                      isHost: p.id == room.hostId,
+                      accent: AppColors
+                          .playerAccents[i % AppColors.playerAccents.length],
+                    ),
+                    const SizedBox(height: 10),
                   ],
-                ),
+                  for (var i = room.players.length; i < 4; i++) ...[
+                    const _EmptySlot(),
+                    const SizedBox(height: 10),
+                  ],
+                ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
               // Anyone in the room (host or guest) can invite online friends.
               PillButton.ghost(
                 label: 'ادعُ أصحابك',
@@ -407,11 +424,12 @@ class _LobbyView extends StatelessWidget {
                 // surfaces as a snackbar. The client never duplicates the
                 // threshold.
                 GameButton(
-                  label: 'ابدأ اللعب',
+                  label: 'ابدأ الجيم',
                   icon: Icons.sports_esports_rounded,
                   height: 58,
                   gradient: AppGradients.turn,
                   glowColor: AppColors.neonPurple,
+                  mediumHaptic: true,
                   onPressed: room.startGame,
                 )
               else
@@ -425,6 +443,182 @@ class _LobbyView extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Lobby pieces: copyable room code, player slots, pulsing empty seats.
+// ---------------------------------------------------------------------------
+
+/// Hero room code — tap anywhere on the card to copy, with a light haptic
+/// and a "تم نسخ الكود ✔" nudge.
+class _CopyableRoomCode extends StatelessWidget {
+  final String code;
+
+  const _CopyableRoomCode({required this.code});
+
+  void _copy(BuildContext context) {
+    HapticFeedback.lightImpact();
+    Clipboard.setData(ClipboardData(text: code));
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(milliseconds: 1400),
+          backgroundColor: const Color(0xF5141722),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(
+                color: AppColors.emerald.withValues(alpha: .55)),
+          ),
+          content: Text('تم نسخ الكود ✔',
+              textAlign: TextAlign.center,
+              style: AppText.ui(size: 13.5, weight: FontWeight.w800)),
+        ),
+      );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _copy(context),
+      child: GradientBorderCard(
+        gradient: AppGradients.turn,
+        padding: const EdgeInsets.symmetric(vertical: 18),
+        child: Column(
+          children: [
+            Text('كود الأوضة',
+                style:
+                    AppText.ui(size: 12.5, color: AppColors.textSecondary)),
+            const SizedBox(height: 6),
+            Text(code,
+                style: AppText.number(
+                    size: 44, weight: FontWeight.w800, spacing: 10)),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.copy_rounded,
+                    size: 12, color: AppColors.textSecondary),
+                const SizedBox(width: 5),
+                Text('دوس للنسخ وابعته لأصحابك',
+                    style: AppText.ui(
+                        size: 12, color: AppColors.textSecondary)),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One seated player: glass slot with the seat's identity glow, avatar
+/// badge, name, and the host crown.
+class _PlayerSlot extends StatelessWidget {
+  final OnlinePlayer player;
+  final bool isHost;
+  final Color accent;
+
+  const _PlayerSlot({
+    required this.player,
+    required this.isHost,
+    required this.accent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Color.lerp(AppColors.surface, accent, .07),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: accent.withValues(alpha: .5)),
+        boxShadow: [
+          BoxShadow(color: accent.withValues(alpha: .16), blurRadius: 14),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: accent.withValues(alpha: .8), width: 1.6),
+              boxShadow: [
+                BoxShadow(color: accent.withValues(alpha: .4), blurRadius: 8),
+              ],
+            ),
+            child: _Avatar(player: player, size: 34),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(player.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppText.ui(size: 14.5, weight: FontWeight.w700)),
+          ),
+          if (isHost) const Text('👑', style: TextStyle(fontSize: 16)),
+        ],
+      ),
+    );
+  }
+}
+
+/// An open seat: softly pulsing dashed-feel outline with "بانتظار لاعب...".
+class _EmptySlot extends StatefulWidget {
+  const _EmptySlot();
+
+  @override
+  State<_EmptySlot> createState() => _EmptySlotState();
+}
+
+class _EmptySlotState extends State<_EmptySlot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (context, _) {
+        final t = Curves.easeInOut.transform(_pulse.value);
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: AppColors.primaryViolet.withValues(alpha: .15 + .25 * t),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.person_outline_rounded,
+                  size: 20,
+                  color: AppColors.textSecondary
+                      .withValues(alpha: .35 + .3 * t)),
+              const SizedBox(width: 12),
+              Text('بانتظار لاعب...',
+                  style: AppText.ui(
+                      size: 13,
+                      weight: FontWeight.w700,
+                      color: AppColors.textSecondary
+                          .withValues(alpha: .4 + .3 * t))),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -562,23 +756,39 @@ class _NeonChip extends StatelessWidget {
             weight: FontWeight.w800,
             color: selected ? Colors.white : AppColors.textSecondary);
     return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 240),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected ? accent.withValues(alpha: .18) : AppColors.glassFill,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected ? accent.withValues(alpha: .85) : AppColors.stroke,
-            width: selected ? 1.4 : 1,
+      onTap: onTap == null
+          ? null
+          : () {
+              HapticFeedback.lightImpact(); // toggle tick
+              onTap!();
+            },
+      child: AnimatedScale(
+        // Springy pop when this chip becomes the selection.
+        scale: selected ? 1.06 : 1.0,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutBack,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+          decoration: BoxDecoration(
+            color:
+                selected ? accent.withValues(alpha: .18) : AppColors.glassFill,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color:
+                  selected ? accent.withValues(alpha: .85) : AppColors.stroke,
+              width: selected ? 1.4 : 1,
+            ),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                        color: accent.withValues(alpha: .35), blurRadius: 12)
+                  ]
+                : null,
           ),
-          boxShadow: selected
-              ? [BoxShadow(color: accent.withValues(alpha: .35), blurRadius: 12)]
-              : null,
+          child: Text(label, style: style),
         ),
-        child: Text(label, style: style),
       ),
     );
   }
@@ -668,6 +878,7 @@ class _TurnViewState extends State<_TurnView> {
                 icon: Icons.send_rounded,
                 gradient: AppGradients.truth,
                 glowColor: AppColors.emeraldDeep,
+                mediumHaptic: true, // committing a fact is a big moment
                 onPressed: _submit,
               ),
             ] else
@@ -774,7 +985,12 @@ class _TurnCountdownState extends State<_TurnCountdown>
         final flash = danger && widget.emphasize
             ? (math.sin(remaining * math.pi * 4) + 1) / 2
             : 0.0;
-        return Transform.scale(
+        // Nervous jitter for EVERYONE in the last 5s — tension is shared.
+        final jitter =
+            danger ? math.sin(remaining * math.pi * 9) * 1.5 : 0.0;
+        return Transform.translate(
+          offset: Offset(jitter, 0),
+          child: Transform.scale(
           scale: 1 + .08 * flash,
           child: SizedBox(
             width: 52,
@@ -796,6 +1012,7 @@ class _TurnCountdownState extends State<_TurnCountdown>
                 ),
               ),
             ),
+          ),
           ),
         );
       },
@@ -1006,6 +1223,7 @@ class _VotingView extends StatelessWidget {
                       height: 56,
                       gradient: AppGradients.falsehood,
                       glowColor: AppColors.rubyDeep,
+                      mediumHaptic: true,
                       onPressed: () =>
                           context.read<GameRoomState>().submitVote(false),
                     ),
@@ -1017,6 +1235,7 @@ class _VotingView extends StatelessWidget {
                       height: 56,
                       gradient: AppGradients.truth,
                       glowColor: AppColors.emeraldDeep,
+                      mediumHaptic: true,
                       onPressed: () =>
                           context.read<GameRoomState>().submitVote(true),
                     ),
@@ -1053,13 +1272,10 @@ class _GameOverView extends StatelessWidget {
               const Text('🏆', style: TextStyle(fontSize: 72)),
               const SizedBox(height: 12),
               if (winner != null)
-                ShaderMask(
-                  shaderCallback: (r) => AppGradients.turn.createShader(r),
-                  child: Text(winner.name,
-                      style: AppText.ui(
-                          size: 30,
-                          weight: FontWeight.w800,
-                          color: Colors.white)),
+                GradientText(
+                  winner.name,
+                  gradient: AppGradients.wordmark,
+                  style: AppText.ui(size: 30, weight: FontWeight.w800),
                 ),
               Text(
                 room.gameOverReason == 'not_enough_players'
@@ -1101,7 +1317,10 @@ class _GameOverView extends StatelessWidget {
                               AddFriendButton(playerId: p.id),
                               const SizedBox(width: 10),
                             ],
-                            Text('${p.score}',
+                            // Podium scores count up on reveal.
+                            AnimatedCount(
+                                value: p.score,
+                                duration: const Duration(milliseconds: 900),
                                 style: AppText.number(
                                     size: 20, weight: FontWeight.w800)),
                           ],
