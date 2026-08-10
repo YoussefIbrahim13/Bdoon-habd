@@ -286,6 +286,315 @@ class _FlashOverlayState extends State<FlashOverlay>
 }
 
 // ---------------------------------------------------------------------------
+// Fireworks (match over)
+// ---------------------------------------------------------------------------
+
+/// Celebratory volley of fireworks for the winner's podium: shells rise from
+/// off-screen, flash, and scatter into gravity-pulled sparks.
+///
+/// One-shot like everything else here — a [trigger] bump plays [volleys]
+/// rounds and then settles to an empty box, so `pumpAndSettle` still
+/// terminates and an idle podium costs nothing.
+class FireworksLayer extends StatefulWidget {
+  final int trigger;
+
+  /// Rounds of ~4 shells. Four volleys is roughly 6.5s of celebration.
+  final int volleys;
+
+  const FireworksLayer({super.key, required this.trigger, this.volleys = 4});
+
+  @override
+  State<FireworksLayer> createState() => _FireworksLayerState();
+}
+
+class _FireworksLayerState extends State<FireworksLayer>
+    with SingleTickerProviderStateMixin {
+  static const _shellsPerVolley = 4;
+  static const _volleyMs = 1600;
+
+  /// A shell's whole life (rise + burst) as a fraction of the full show.
+  late final double _life;
+
+  late final AnimationController _show = AnimationController(
+    vsync: this,
+    duration: Duration(milliseconds: _volleyMs * widget.volleys),
+  );
+  List<_Shell> _shells = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _life = 1700 / (_volleyMs * widget.volleys);
+    if (widget.trigger > 0) _play();
+  }
+
+  @override
+  void didUpdateWidget(FireworksLayer old) {
+    super.didUpdateWidget(old);
+    if (widget.trigger != old.trigger && widget.trigger > 0) _play();
+  }
+
+  void _play() {
+    final rng = math.Random(widget.trigger);
+    const palette = [
+      AppColors.amber,
+      AppColors.electricBlue,
+      AppColors.emerald,
+      AppColors.accentGlow,
+      AppColors.ruby,
+      AppColors.primaryViolet,
+    ];
+    final count = _shellsPerVolley * widget.volleys;
+    _shells = List.generate(count, (i) {
+      // Spread launches evenly across the show, then jitter so volleys don't
+      // read as a metronome.
+      final slot = i / count;
+      final start = (slot + (rng.nextDouble() - .5) * .05).clamp(0.0, 1 - _life);
+      final burstX = .16 + rng.nextDouble() * .68;
+      return _Shell(
+        startT: start,
+        life: _life,
+        riseFrac: .34 + rng.nextDouble() * .1,
+        launchX: (burstX + (rng.nextDouble() - .5) * .22).clamp(.05, .95),
+        burstX: burstX,
+        burstY: .18 + rng.nextDouble() * .34,
+        color: palette[(i + rng.nextInt(palette.length)) % palette.length],
+        sparks: List.generate(26, (k) {
+          // Even angular spread + jitter keeps the burst round, not clumpy.
+          final angle =
+              k / 26 * 2 * math.pi + (rng.nextDouble() - .5) * .22;
+          return _Spark(
+            angle: angle,
+            speed: .55 + rng.nextDouble() * .55,
+            size: 1.5 + rng.nextDouble() * 1.9,
+            phase: rng.nextDouble() * 2,
+          );
+        }),
+      );
+    });
+    _show.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _show.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: RepaintBoundary(
+        child: AnimatedBuilder(
+          animation: _show,
+          builder: (context, _) {
+            if (!_show.isAnimating) return const SizedBox.shrink();
+            return CustomPaint(
+              size: Size.infinite,
+              painter: _FireworksPainter(shells: _shells, t: _show.value),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _Spark {
+  final double angle, speed, size, phase;
+  const _Spark({
+    required this.angle,
+    required this.speed,
+    required this.size,
+    required this.phase,
+  });
+}
+
+class _Shell {
+  final double startT, life, riseFrac, launchX, burstX, burstY;
+  final Color color;
+  final List<_Spark> sparks;
+  const _Shell({
+    required this.startT,
+    required this.life,
+    required this.riseFrac,
+    required this.launchX,
+    required this.burstX,
+    required this.burstY,
+    required this.color,
+    required this.sparks,
+  });
+}
+
+class _FireworksPainter extends CustomPainter {
+  final List<_Shell> shells;
+  final double t; // 0..1 across the whole show
+
+  const _FireworksPainter({required this.shells, required this.t});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final reach = size.shortestSide * .34;
+    for (final s in shells) {
+      final local = (t - s.startT) / s.life;
+      if (local <= 0 || local >= 1) continue;
+
+      final burst = Offset(s.burstX * size.width, s.burstY * size.height);
+
+      if (local < s.riseFrac) {
+        // Rising shell: a bright head with a short tail behind it.
+        final p = local / s.riseFrac;
+        final eased = Curves.easeOutQuad.transform(p);
+        final from = Offset(s.launchX * size.width, size.height * 1.05);
+        final head = Offset.lerp(from, burst, eased)!;
+        final tail = Offset.lerp(
+          from,
+          burst,
+          Curves.easeOutQuad.transform((p - .09).clamp(0.0, 1.0)),
+        )!;
+        canvas.drawLine(
+          tail,
+          head,
+          Paint()
+            ..color = s.color.withValues(alpha: .5)
+            ..strokeWidth = 2
+            ..strokeCap = StrokeCap.round,
+        );
+        canvas.drawCircle(
+          head,
+          2.3,
+          Paint()..color = Colors.white.withValues(alpha: .92),
+        );
+        continue;
+      }
+
+      // Burst: sparks fly out, decelerate, then sag under gravity.
+      final b = (local - s.riseFrac) / (1 - s.riseFrac);
+      final eased = Curves.easeOutCubic.transform(b);
+      final fade = math.pow(1 - b, 1.5).toDouble();
+
+      if (b < .18) {
+        // Muzzle flash at the detonation point.
+        final f = 1 - b / .18;
+        canvas.drawCircle(
+          burst,
+          18 * f,
+          Paint()
+            ..color = Colors.white.withValues(alpha: .45 * f)
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9),
+        );
+      }
+
+      for (final sp in s.sparks) {
+        final r = eased * reach * sp.speed;
+        final gravity = .45 * b * b * reach;
+        final pos = burst +
+            Offset(math.cos(sp.angle) * r, math.sin(sp.angle) * r + gravity);
+        // Sparks start white-hot and cool into the shell's color.
+        final color = Color.lerp(Colors.white, s.color, (b * 2.4).clamp(0, 1))!;
+        final twinkle = .6 + .4 * math.sin((b * 16 + sp.phase) * math.pi);
+        canvas.drawCircle(
+          pos,
+          sp.size * (1 - b * .4),
+          Paint()
+            ..color = color.withValues(alpha: (fade * twinkle).clamp(0.0, 1.0)),
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_FireworksPainter old) => old.t != t;
+}
+
+// ---------------------------------------------------------------------------
+// Result face (match over)
+// ---------------------------------------------------------------------------
+
+/// The big emoji at the top of the end-of-match screen: pops in with an
+/// elastic overshoot, settles through two decaying bobs, and sits over a
+/// colored glow. Plays once and settles.
+class ResultFace extends StatefulWidget {
+  final String emoji;
+  final Color glow;
+  final double size;
+
+  const ResultFace({
+    super.key,
+    required this.emoji,
+    required this.glow,
+    this.size = 84,
+  });
+
+  @override
+  State<ResultFace> createState() => _ResultFaceState();
+}
+
+class _ResultFaceState extends State<ResultFace>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _in = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2200),
+  )..forward();
+
+  @override
+  void didUpdateWidget(ResultFace old) {
+    super.didUpdateWidget(old);
+    // A changed result (rare, e.g. a late score sync) replays the reveal.
+    if (widget.emoji != old.emoji) _in.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _in.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _in,
+      builder: (context, _) {
+        final t = _in.value;
+        // Elastic pop over the first 40%, then decaying bobs.
+        final pop = t < .4
+            ? Curves.elasticOut.transform(t / .4)
+            : 1.0;
+        final bobT = ((t - .4) / .6).clamp(0.0, 1.0);
+        final bob = math.sin(bobT * math.pi * 4) * 6 * (1 - bobT);
+        final glowA = (.20 + .16 * (1 - bobT)) * pop.clamp(0.0, 1.0);
+
+        return Transform.translate(
+          offset: Offset(0, -bob),
+          child: Transform.scale(
+            scale: pop,
+            child: Container(
+              width: widget.size * 1.6,
+              height: widget.size * 1.6,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    widget.glow.withValues(alpha: glowA),
+                    widget.glow.withValues(alpha: 0),
+                  ],
+                  stops: const [0.0, 1.0],
+                ),
+              ),
+              child: Text(
+                widget.emoji,
+                style: TextStyle(fontSize: widget.size),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Animated numbers
 // ---------------------------------------------------------------------------
 

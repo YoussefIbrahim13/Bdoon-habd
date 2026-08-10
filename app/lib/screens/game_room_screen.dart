@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../models/game_events.dart';
+import '../models/ranking.dart';
 import '../services/auth_service.dart';
 import '../services/friendship_service.dart';
 import '../state/friendship_state.dart';
@@ -59,10 +60,12 @@ class _GameRoomViewState extends State<_GameRoomView> {
   RoomInvitePushed? _pendingInvite;
   OnlinePhase? _lastPhase;
 
-  // One-shot FX triggers (bump = play): confetti on صح, shake+flash on هبد.
+  // One-shot FX triggers (bump = play): confetti on صح, shake+flash on هبد,
+  // fireworks on the final podium.
   int _confettiTrigger = 0;
   int _shakeTrigger = 0;
   int _flashTrigger = 0;
+  int _fireworksTrigger = 0;
 
   @override
   void initState() {
@@ -148,11 +151,17 @@ class _GameRoomViewState extends State<_GameRoomView> {
         );
       }
     }
-    // Phase-edge effects: heavy thump + celebration on the final podium.
+    // Phase-edge effects: heavy thump + celebration on the final podium. A
+    // room that died for lack of players gets no fanfare.
     if (_room.phase != _lastPhase) {
       if (_room.phase == OnlinePhase.gameOver) {
         HapticFeedback.heavyImpact();
-        setState(() => _confettiTrigger++);
+        setState(() {
+          _confettiTrigger++;
+          if (_room.gameOverReason != 'not_enough_players') {
+            _fireworksTrigger++;
+          }
+        });
       }
       _lastPhase = _room.phase;
     }
@@ -199,6 +208,8 @@ class _GameRoomViewState extends State<_GameRoomView> {
       body: Stack(
         children: [
           const AmbientBackground(),
+          // Behind the podium so sparks never wash out the standings.
+          Positioned.fill(child: FireworksLayer(trigger: _fireworksTrigger)),
           SafeArea(
             // Shake the whole board on a busted round / timeout.
             child: ShakeWrapper(
@@ -1259,9 +1270,27 @@ class _GameOverView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final room = context.watch<GameRoomState>();
-    final winner = room.winner;
-    final ranked = [...room.players]
-      ..sort((a, b) => b.score.compareTo(a.score));
+    final players = room.players;
+    final abandoned = room.gameOverReason == 'not_enough_players';
+    final standings = standingsFrom(
+      [for (final p in players) p.name],
+      [for (final p in players) p.score],
+    );
+    // Online the screen is personal: the face reflects where YOU landed.
+    int? myRank;
+    for (final s in standings) {
+      if (players[s.index].id == room.myId) {
+        myRank = s.rank;
+        break;
+      }
+    }
+    final result =
+        abandoned ? MatchResult.abandoned : resultFor(standings, myRank);
+    final champion = standings.isEmpty ? null : standings.first;
+    final crowned = !abandoned &&
+        champion != null &&
+        result != MatchResult.draw;
+
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(28),
@@ -1269,62 +1298,44 @@ class _GameOverView extends StatelessWidget {
           constraints: const BoxConstraints(maxWidth: 420),
           child: Column(
             children: [
-              const Text('🏆', style: TextStyle(fontSize: 72)),
+              ResultFace(
+                emoji: faceFor(result),
+                glow: switch (result) {
+                  MatchResult.champion => AppColors.amber,
+                  MatchResult.draw => AppColors.electricBlue,
+                  MatchResult.abandoned => AppColors.textSecondary,
+                  _ => AppColors.accentGlow,
+                },
+                size: 72,
+              ),
               const SizedBox(height: 12),
-              if (winner != null)
+              if (crowned)
                 GradientText(
-                  winner.name,
+                  champion.name,
                   gradient: AppGradients.wordmark,
                   style: AppText.ui(size: 30, weight: FontWeight.w800),
                 ),
               Text(
-                room.gameOverReason == 'not_enough_players'
+                abandoned
                     ? 'اللعبة خلصت — مفيش لاعيبة كفاية.'
-                    : 'الفائز بالماتش!',
+                    : captionFor(result),
+                textAlign: TextAlign.center,
                 style: AppText.ui(size: 13.5, color: AppColors.textSecondary),
               ),
               const SizedBox(height: 22),
               GlassContainer(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(12),
                 child: Column(
                   children: [
-                    for (final (i, p) in ranked.indexed)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        child: Row(
-                          children: [
-                            Text(
-                              switch (i) {
-                                0 => '🥇',
-                                1 => '🥈',
-                                2 => '🥉',
-                                _ => '  ',
-                              },
-                              style: const TextStyle(fontSize: 18),
-                            ),
-                            const SizedBox(width: 8),
-                            _Avatar(player: p, size: 30),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(p.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppText.ui(
-                                      size: 14.5, weight: FontWeight.w700)),
-                            ),
-                            // Add-friend for everyone but yourself.
-                            if (p.id != room.myId) ...[
-                              AddFriendButton(playerId: p.id),
-                              const SizedBox(width: 10),
-                            ],
-                            // Podium scores count up on reveal.
-                            AnimatedCount(
-                                value: p.score,
-                                duration: const Duration(milliseconds: 900),
-                                style: AppText.number(
-                                    size: 20, weight: FontWeight.w800)),
-                          ],
-                        ),
+                    for (final s in standings)
+                      PodiumRow(
+                        standing: s,
+                        isYou: players[s.index].id == room.myId,
+                        leading: _Avatar(player: players[s.index], size: 30),
+                        // Add-friend for everyone but yourself.
+                        trailing: players[s.index].id != room.myId
+                            ? AddFriendButton(playerId: players[s.index].id)
+                            : null,
                       ),
                   ],
                 ),

@@ -9,11 +9,10 @@ import '../theme/app_theme.dart';
 /// A dotted-wireframe holographic Earth, drawn entirely in code (no image
 /// assets, no packages) in the NovaPay violet + neon-cyan palette.
 ///
-/// Three layers spin together around the polar axis on a true orthographic
+/// Two layers spin together around the polar axis on a true orthographic
 /// projection, with back-hemisphere culling so it reads as a solid sphere:
 ///   1. a cyan/lavender graticule (parallels + meridians),
-///   2. violet continent outlines,
-///   3. a halftone dot field filling the landmasses.
+///   2. violet continent outlines.
 ///
 /// All geometry is projected onto the unit sphere ONCE at first use (see
 /// [_geometry]) and shared by every instance; per frame the painter only
@@ -73,7 +72,7 @@ const double _tilt = 20 * math.pi / 180;
 /// Coarse landmass rings as flat `[lon, lat, lon, lat, …]` degree pairs,
 /// each implicitly closed. Deliberately low-poly: the outlines are densified
 /// and re-projected per frame, so a handful of vertices is enough to read as
-/// the real continents while keeping the dot sampler cheap.
+/// the real continents.
 const List<List<double>> _landRings = [
   // North + Central America
   [
@@ -89,9 +88,11 @@ const List<List<double>> _landRings = [
     -48, -25, -58, -34, -62, -42, -68, -52, -75, -52, -72, -42, //
     -71, -30, -70, -18, -77, -8, -80, 0,
   ],
-  // Africa
+  // Africa — Atlantic coast up through Morocco, then the Mediterranean rim
+  // (Tunisia reaches 37N), down the Red Sea, round the Horn and the Cape.
   [
-    -17, 15, -5, 20, 10, 32, 20, 32, 32, 31, 35, 25, 43, 12, 51, 12, //
+    -17, 15, -16, 21, -13, 28, -10, 31, -6, 36, 0, 36, 10, 37, 15, 32, //
+    20, 31, 25, 32, 32, 31, 34, 28, 37, 22, 39, 15, 43, 12, 51, 12, //
     42, -2, 40, -15, 35, -24, 25, -34, 18, -34, 13, -23, 9, -1, 9, 4, //
     3, 6, -8, 5, -13, 9,
   ],
@@ -99,7 +100,8 @@ const List<List<double>> _landRings = [
   [
     -10, 43, -9, 38, -6, 36, 3, 40, 10, 44, 16, 41, 19, 40, 24, 38, //
     27, 41, 30, 40, 35, 36, 36, 31, 35, 28, 43, 13, 52, 17, 57, 25, //
-    50, 30, 60, 25, 67, 25, 72, 20, 77, 8, 80, 15, 87, 21, 92, 22, //
+    50, 30, 60, 25, 67, 25, 70, 22, 73, 16, 77, 8, 80, 13, 84, 19, //
+    87, 21, 92, 22, //
     97, 17, 99, 10, 104, 2, 107, 11, 109, 18, 117, 24, 122, 31, //
     122, 40, 128, 42, 130, 48, 135, 55, 143, 59, 150, 60, 160, 60, //
     170, 66, 179, 68, 170, 71, 160, 72, 140, 73, 120, 73, 105, 77, //
@@ -119,24 +121,32 @@ const List<List<double>> _landRings = [
   ],
   // Madagascar
   [43, -12, 50, -15, 48, -25, 44, -22],
-  // British Isles
-  [-5, 50, -2, 53, -3, 58, -6, 57, -6, 52],
+  // Great Britain
+  [-5, 50, 1, 51, 2, 53, 0, 54, -2, 57, -3, 58, -5, 57, -3, 55, -3, 53, //
+    -5, 52],
+  // Ireland
+  [-10, 52, -6, 52, -6, 55, -8, 55, -10, 54],
   // Japan
   [130, 31, 136, 34, 142, 40, 145, 44, 143, 44, 139, 37, 133, 33],
   // New Zealand
   [166, -46, 174, -41, 178, -38, 175, -40, 170, -44, 168, -46],
+  // Antarctica — traced eastward from the antimeridian; the closing edge
+  // wraps across ±180 (see [_densifyRing]). The spur near -60 is the
+  // Antarctic Peninsula, traced up its west side and back down its east.
+  [
+    -180, -78, -165, -77, -150, -75, -135, -74, -120, -73, -105, -73, //
+    -90, -72, -80, -71, -72, -70, -66, -67, -61, -64, -57, -63, //
+    -59, -66, -62, -71, -50, -77, -38, -78, -28, -76, -18, -73, //
+    -8, -70, 2, -69, 14, -70, 28, -70, 40, -68, 52, -66, 65, -67, //
+    78, -67, 90, -66, 102, -66, 114, -66, 126, -66, 138, -66, //
+    148, -68, 158, -71, 168, -75, 176, -78,
+  ],
 ];
 
 /// Everything the painter needs, in unit-sphere coordinates. `xyz` buffers
 /// are flat triples so the per-frame rotation is a tight indexed loop with no
 /// allocation or trigonometry per point.
 class _Geometry {
-  /// Land halftone dots.
-  final Float32List dots;
-
-  /// Per-dot tint: 0 = cyan, 1 = lavender.
-  final Uint8List dotTint;
-
   /// Continent outlines, one densified polyline each.
   final List<Float32List> outlines;
 
@@ -147,14 +157,10 @@ class _Geometry {
   final List<Float32List> meridians;
 
   const _Geometry({
-    required this.dots,
-    required this.dotTint,
     required this.outlines,
     required this.parallels,
     required this.meridians,
   });
-
-  int get dotCount => dots.length ~/ 3;
 }
 
 /// Lazily built on first paint, then reused by every [RotatingGlobe].
@@ -169,24 +175,13 @@ void _writeUnit(Float32List out, int i, double lonDeg, double latDeg) {
   out[i + 2] = cosLat * math.cos(lon);
 }
 
-/// True if `(lon, lat)` falls inside the closed ring, by ray casting.
-bool _inRing(List<double> ring, double lon, double lat) {
-  var inside = false;
-  final n = ring.length ~/ 2;
-  for (var i = 0, j = n - 1; i < n; j = i++) {
-    final xi = ring[i * 2], yi = ring[i * 2 + 1];
-    final xj = ring[j * 2], yj = ring[j * 2 + 1];
-    if ((yi > lat) != (yj > lat) &&
-        lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
-
 /// Subdivides a closed ring so no edge spans more than [maxStep] degrees —
 /// straight screen-space segments between distant vertices would cut across
 /// the sphere instead of wrapping around it.
+///
+/// Longitude steps take the short way around, so an edge that straddles the
+/// antimeridian (Antarctica's closing segment) wraps across ±180 instead of
+/// sweeping all the way back through Greenwich.
 Float32List _densifyRing(List<double> ring, {double maxStep = 3}) {
   final pts = <double>[];
   final n = ring.length ~/ 2;
@@ -194,12 +189,15 @@ Float32List _densifyRing(List<double> ring, {double maxStep = 3}) {
     final j = (i + 1) % n;
     final x0 = ring[i * 2], y0 = ring[i * 2 + 1];
     final x1 = ring[j * 2], y1 = ring[j * 2 + 1];
+    var dx = x1 - x0;
+    if (dx > 180) dx -= 360;
+    if (dx < -180) dx += 360;
+    final dy = y1 - y0;
     final steps =
-        math.max(1, (math.max((x1 - x0).abs(), (y1 - y0).abs()) / maxStep)
-            .ceil());
+        math.max(1, (math.max(dx.abs(), dy.abs()) / maxStep).ceil());
     for (var s = 0; s < steps; s++) {
       final t = s / steps;
-      pts..add(x0 + (x1 - x0) * t)..add(y0 + (y1 - y0) * t);
+      pts..add(x0 + dx * t)..add(y0 + dy * t);
     }
   }
   // Close the loop.
@@ -229,34 +227,7 @@ Float32List _arc(
 }
 
 _Geometry _buildGeometry() {
-  // Halftone sampling: constant latitude step, longitude step widened by
-  // 1/cos(lat) so the dots stay evenly spaced on the sphere instead of
-  // bunching up at the poles.
-  const gridStep = 3.2;
-  final rng = math.Random(42); // stable tint field across runs
-  final dotLonLat = <double>[];
-  final tints = <int>[];
-  for (var lat = -84.0; lat <= 84.0; lat += gridStep) {
-    final lonStep = gridStep / math.max(math.cos(lat * math.pi / 180), 0.22);
-    for (var lon = -180.0; lon < 180.0; lon += lonStep) {
-      for (final ring in _landRings) {
-        if (_inRing(ring, lon, lat)) {
-          dotLonLat..add(lon)..add(lat);
-          tints.add(rng.nextDouble() < 0.55 ? 0 : 1);
-          break;
-        }
-      }
-    }
-  }
-
-  final dots = Float32List(tints.length * 3);
-  for (var i = 0; i < tints.length; i++) {
-    _writeUnit(dots, i * 3, dotLonLat[i * 2], dotLonLat[i * 2 + 1]);
-  }
-
   return _Geometry(
-    dots: dots,
-    dotTint: Uint8List.fromList(tints),
     outlines: [for (final ring in _landRings) _densifyRing(ring)],
     parallels: [
       for (final lat in const [-60.0, -30.0, 0.0, 30.0, 60.0])
@@ -273,13 +244,11 @@ _Geometry _buildGeometry() {
 // Painter
 // ---------------------------------------------------------------------------
 
-/// Depth bands. Segments and dots are bucketed by how far they face the
-/// viewer, then each bucket is drawn in one batched call — this is what keeps
-/// the frame down to ~15 draw calls instead of a few thousand.
+/// Depth bands. Segments are bucketed by how far they face the viewer, then
+/// each bucket is drawn in one batched call — this is what keeps the frame
+/// down to a handful of draw calls instead of a few thousand.
 const List<double> _wireAlphaGrid = [0.09, 0.17, 0.26];
 const List<double> _wireAlphaLand = [0.28, 0.55, 0.88];
-const List<double> _dotAlpha = [0.34, 0.7, 1.0];
-const List<double> _dotRadius = [0.85, 1.2, 1.55];
 
 int _band(double z) => z < 0.32 ? 0 : (z < 0.68 ? 1 : 2);
 
@@ -367,30 +336,6 @@ class _GlobePainter extends CustomPainter {
     strokeBands(meridianBands, AppColors.accentGlow, _wireAlphaGrid, 1.0);
     strokeBands(outlineBands, AppColors.primaryViolet, _wireAlphaLand, 1.2);
 
-    // --- Halftone land dots ----------------------------------------------
-    // Six buckets: two tints x three depth bands.
-    final dotBuckets = [emptyBands(), emptyBands()];
-    for (var i = 0; i < g.dotCount; i++) {
-      project(g.dots, i * 3);
-      if (pz <= 0.03) continue; // back hemisphere
-      dotBuckets[g.dotTint[i]][_band(pz)].add(Offset(px, py));
-    }
-    const tintColors = [AppColors.electricBlue, AppColors.accentGlow];
-    for (var t = 0; t < 2; t++) {
-      for (var b = 0; b < 3; b++) {
-        final pts = dotBuckets[t][b];
-        if (pts.isEmpty) continue;
-        canvas.drawPoints(
-          ui.PointMode.points,
-          pts,
-          Paint()
-            ..color = tintColors[t].withValues(alpha: _dotAlpha[b])
-            ..strokeWidth = _dotRadius[b] * 2
-            ..strokeCap = StrokeCap.round,
-        );
-      }
-    }
-
     _paintTextVeil(canvas, center, r);
     _paintRim(canvas, center, r);
   }
@@ -430,7 +375,7 @@ class _GlobePainter extends CustomPainter {
     );
   }
 
-  /// Keeps "بدون هبد!" at full contrast: the dot field is darkened toward the
+  /// Keeps "بدون هبد!" at full contrast: the wireframe is darkened toward the
   /// middle of the disc, where the headline sits, and left bright at the limb.
   void _paintTextVeil(Canvas canvas, Offset center, double r) {
     canvas.drawCircle(

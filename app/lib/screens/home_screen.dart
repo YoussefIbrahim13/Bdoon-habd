@@ -134,24 +134,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       const SizedBox(height: 12),
-                      Center(
-                        child: Container(
-                          width: 96,
-                          height: 96,
-                          decoration: BoxDecoration(
-                            gradient: AppGradients.turn,
-                            borderRadius: BorderRadius.circular(28),
-                            boxShadow: AppShadows.glow(AppColors.neonPurple,
-                                alpha: .5, blur: 34),
-                          ),
-                          // Brand emblem without its own badge — it sits on
-                          // this gradient capsule and idles with its own
-                          // breathing pulse.
-                          child: const Center(
-                            child:
-                                AppLogo(size: 68, showBadge: false, animate: true),
-                          ),
-                        ),
+                      // The launcher icon itself: obsidian badge, cyan→violet
+                      // gradient border, idling on its own breathing pulse.
+                      // Same 96 box as before, so the layout below is
+                      // unaffected.
+                      const Center(
+                        child: AppLogo(size: 96, animate: true),
                       ),
                       const SizedBox(height: 22),
                       const DisplayHeadline(

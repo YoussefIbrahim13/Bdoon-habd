@@ -3,7 +3,9 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/ranking.dart';
 import '../theme/app_theme.dart';
+import 'fx.dart';
 
 /// NovaPay design-language building blocks: pill buttons, glass cards, stat
 /// chips, and the big display headline. All read their colors/type from the
@@ -447,6 +449,122 @@ class DisplayHeadline extends StatelessWidget {
       gradient: AppGradients.wordmark,
       style: AppText.display(size: size),
       textAlign: align,
+    );
+  }
+}
+
+/// One row of the end-of-match podium, shared by the offline and online
+/// results screens so both rank and celebrate identically.
+///
+/// First place gets an amber-lit card; everyone below sits on plain glass.
+/// [leading] and [trailing] are mode-specific slots (online passes an avatar
+/// and an add-friend button, offline passes nothing).
+class PodiumRow extends StatelessWidget {
+  final Standing standing;
+  final Widget? leading;
+  final Widget? trailing;
+
+  /// Marks the local player online; offline every row is "you" so it's off.
+  final bool isYou;
+
+  const PodiumRow({
+    super.key,
+    required this.standing,
+    this.leading,
+    this.trailing,
+    this.isYou = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final champ = standing.isChampion;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 260),
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        gradient: champ
+            ? LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  AppColors.amber.withValues(alpha: .16),
+                  AppColors.amber.withValues(alpha: .02),
+                ],
+              )
+            : null,
+        color: champ ? null : AppColors.glassFill,
+        border: Border.all(
+          color: champ
+              ? AppColors.amber.withValues(alpha: .5)
+              : AppColors.stroke,
+        ),
+        boxShadow: champ
+            ? [
+                BoxShadow(
+                  color: AppColors.amber.withValues(alpha: .22),
+                  blurRadius: 18,
+                  spreadRadius: -2,
+                ),
+              ]
+            : null,
+      ),
+      child: Row(
+        children: [
+          // Plain place number for everyone — no medals, so the column reads
+          // as a straight 1, 2, 3 list.
+          SizedBox(
+            width: 26,
+            child: Text(
+              '${standing.place}',
+              textAlign: TextAlign.center,
+              style: AppText.number(
+                size: champ ? 18 : 15,
+                weight: FontWeight.w800,
+                color: champ ? AppColors.amber : AppColors.textSecondary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (leading != null) ...[leading!, const SizedBox(width: 10)],
+          Expanded(
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    standing.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.ui(
+                      size: champ ? 15.5 : 14.5,
+                      weight: champ ? FontWeight.w800 : FontWeight.w700,
+                      color: champ ? AppColors.amber : AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+                if (isYou) ...[
+                  const SizedBox(width: 6),
+                  Text('(أنت)',
+                      style: AppText.ui(
+                          size: 11.5, color: AppColors.textSecondary)),
+                ],
+              ],
+            ),
+          ),
+          if (trailing != null) ...[trailing!, const SizedBox(width: 10)],
+          // Scores count up as the podium reveals.
+          AnimatedCount(
+            value: standing.score,
+            duration: const Duration(milliseconds: 900),
+            style: AppText.number(
+              size: champ ? 22 : 20,
+              weight: FontWeight.w800,
+              color: champ ? AppColors.amber : AppColors.textPrimary,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

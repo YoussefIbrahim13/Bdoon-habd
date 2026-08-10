@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'home_screen.dart';
+import '../models/ranking.dart';
 import '../state/game_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/countdown_ring.dart';
@@ -661,66 +662,94 @@ class _TopBar extends StatelessWidget {
 // Full-screen takeover shown when the match is decided. Reads GameState
 // directly (values are frozen once the phase is matchOver).
 
-class _MatchOverView extends StatelessWidget {
+class _MatchOverView extends StatefulWidget {
   const _MatchOverView();
+
+  @override
+  State<_MatchOverView> createState() => _MatchOverViewState();
+}
+
+class _MatchOverViewState extends State<_MatchOverView> {
+  int _fireworks = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // The takeover animates in on its own; kick the celebration with it.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      HapticFeedback.heavyImpact();
+      setState(() => _fireworks++);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final game = context.watch<GameState>();
-    final winner = game.matchWinner!;
+    final standings = standingsFrom(game.playerNames, game.scores);
+    // Shared device: the screen speaks for the winner, so no "me" perspective.
+    final result = resultFor(standings, null);
+    final champion = standings.first;
+
     return Scaffold(
       body: Stack(
         children: [
           const AmbientBackground(),
+          // Behind the card so sparks never wash out the text.
+          Positioned.fill(child: FireworksLayer(trigger: _fireworks)),
           SafeArea(
             child: Center(
-              child: Padding(
+              child: SingleChildScrollView(
                 padding: const EdgeInsets.all(28),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text('🏆', style: TextStyle(fontSize: 84)),
-                    const SizedBox(height: 20),
-                    GradientText(
-                      game.playerNames[winner],
-                      gradient: AppGradients.wordmark,
-                      textAlign: TextAlign.center,
-                      style: AppText.ui(size: 32, weight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'الفائز باللعبة',
-                      style: AppText.ui(
-                        size: 14,
-                        color: AppColors.textSecondary,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ResultFace(
+                        emoji: faceFor(result),
+                        glow: result == MatchResult.draw
+                            ? AppColors.electricBlue
+                            : AppColors.amber,
                       ),
-                    ),
-                    const SizedBox(height: 24),
-                    GlassContainer(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 30,
-                        vertical: 16,
-                      ),
-                      child: Text(
-                        game.scores.join('  -  '),
-                        style: AppText.number(
-                          size: game.totalPlayers > 2 ? 30 : 40,
-                          weight: FontWeight.w800,
+                      const SizedBox(height: 12),
+                      if (result != MatchResult.draw)
+                        GradientText(
+                          champion.name,
+                          gradient: AppGradients.wordmark,
+                          textAlign: TextAlign.center,
+                          style: AppText.ui(size: 32, weight: FontWeight.w800),
+                        ),
+                      const SizedBox(height: 6),
+                      Text(
+                        captionFor(result),
+                        style: AppText.ui(
+                          size: 14,
+                          color: AppColors.textSecondary,
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 34),
-                    GameButton(
-                      label: 'لعبة جديدة',
-                      icon: Icons.replay_rounded,
-                      gradient: AppGradients.turn,
-                      glowColor: AppColors.neonPurple,
-                      onPressed: () {
-                        game.backToSetup();
-                        Navigator.of(context).pop();
-                      },
-                    ),
-                  ],
+                      const SizedBox(height: 24),
+                      GlassContainer(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          children: [
+                            for (final s in standings) PodiumRow(standing: s),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 34),
+                      GameButton(
+                        label: 'لعبة جديدة',
+                        icon: Icons.replay_rounded,
+                        gradient: AppGradients.turn,
+                        glowColor: AppColors.neonPurple,
+                        onPressed: () {
+                          game.backToSetup();
+                          Navigator.of(context).pop();
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
